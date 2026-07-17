@@ -1,5 +1,6 @@
 package com.lu.postrobotsystem.model.request.user;
 
+import com.lu.postrobotsystem.model.enums.UserRoleEnum;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -32,6 +33,9 @@ public class UserEditRequest implements Serializable {
 
     @Schema(description = "邮箱")
     private String email;                       // 用户的电子邮箱地址
+
+    @Schema(description = "角色（ADMIN/OPERATOR/MAINTAINER，仅管理员可修改）")
+    private UserRoleEnum role;                  // 用户角色，仅管理员可修改，普通用户不传此字段
 
     @Schema(description = "当前密码（修改密码时必填）")
     private String password;                    // 当前密码，修改密码时为必填项，用于身份验证

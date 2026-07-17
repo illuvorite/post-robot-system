@@ -6,33 +6,6 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 事务ID生成器
- * <p>
- * 用于生成全局唯一的事务标识（TransactionID），
- * 作为与邮政外部系统通信时的请求追踪凭证。
- * 生成的ID格式为：{@code 5位平台编码 + 17位时间戳 + 10位流水号 = 32位}。
- * </p>
- *
- * <p><b>ID结构说明：</b>
- * <ul>
- *   <li><b>平台编码（5位）：</b>固定为 "POSTR"，标识邮政机器人系统</li>
- *   <li><b>时间戳（17位）：</b>格式为 yyyyMMddHHmmssSSS，精确到毫秒</li>
- *   <li><b>流水号（10位）：</b>基于 {@link AtomicLong} 的递增序列，从 0000000000 开始，达到 9999999999 后归零</li>
- * </ul>
- * </p>
- *
- * <p><b>调用关系：</b>
- * <ul>
- *   <li>被 {@link SignUtil#sign} 调用，作为签名计算参数之一</li>
- *   <li>被发送请求的拦截器或客户端调用，设置请求头中的 TransactionID</li>
- * </ul>
- * </p>
- *
- * <p><b>线程安全：</b>
- * 使用 {@link AtomicLong} 保证高并发场景下流水号的线程安全性。
- * </p>
- *
- * @author lu
- * @since 1.0.0
  */
 public class TransactionIdGenerator {
 

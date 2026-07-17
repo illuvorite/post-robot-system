@@ -19,6 +19,9 @@ public class InventoryQueryRequest extends PageRequest implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    @Schema(description = "商品名称（模糊查询）")
+    private String productName;
+
     @Schema(description = "关联商品ID")
     private Long productId;                     // 关联商品ID，精确匹配
 

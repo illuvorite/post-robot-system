@@ -2,10 +2,11 @@ package com.lu.postrobotsystem.model.request.user;
 
 import com.lu.postrobotsystem.model.enums.UserRoleEnum;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 import java.io.Serializable;
-import java.time.LocalDateTime;
 
 /**
  * 用户新增请求 DTO。
@@ -19,20 +20,20 @@ import java.time.LocalDateTime;
 public class UserAddRequest  implements Serializable {
     private static final long serialVersionUID = 1L;
 
+    @NotBlank(message = "账号不能为空")
     @Schema(description = "登录账号")
-    private String username;                    // 登录账号，用户登录时使用的唯一标识
+    private String username;
 
     @Schema(description = "真实姓名")
-    private String realName;                    // 用户的真实姓名
+    private String realName;
 
     @Schema(description = "手机号")
-    private String phone;                       // 用户的手机号码
+    private String phone;
 
     @Schema(description = "邮箱")
-    private String email;                       // 用户的电子邮箱地址
+    private String email;
 
+    @NotNull(message = "角色不能为空")
     @Schema(description = "角色（ADMIN/OPERATOR/MAINTAINER）")
-    private UserRoleEnum role;                  // 用户角色：ADMIN-管理员，OPERATOR-操作员，MAINTAINER-维护员
-
-
+    private UserRoleEnum role;
 }

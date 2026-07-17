@@ -1,5 +1,6 @@
 package com.lu.postrobotsystem.model.enums;
 
+import com.baomidou.mybatisplus.annotation.EnumValue;
 import lombok.Getter;
 
 /**
@@ -19,6 +20,7 @@ public enum ProductStatusEnum {
 
     private final String value;
     private final String text;
+    @EnumValue
     private final int code;
 
     ProductStatusEnum(String value, String text, int code) {

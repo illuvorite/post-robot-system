@@ -13,25 +13,6 @@ import java.time.LocalDateTime;
 
 /**
  * MyBatis-Plus 配置类
- * <p>
- * 为 MyBatis-Plus 框架提供核心组件配置，包括：
- * </p>
- * <ul>
- *   <li><b>分页插件：</b>自动拦截分页查询，拼接 LIMIT/OFFSET 语句</li>
- *   <li><b>自动填充处理器：</b>在插入和更新时自动填充 createTime/updateTime 字段</li>
- *   <li><b>Mapper 扫描：</b>扫描指定包路径下的 Mapper 接口，注册为 Spring Bean</li>
- * </ul>
- *
- * <p><b>调用关系：</b>
- * <ul>
- *   <li>分页拦截器 -- 在所有 Mapper 接口执行分页查询时生效</li>
- *   <li>自动填充处理器 -- 在所有实体类执行 insert/update 时自动填充时间字段</li>
- *   <li>Mapper 扫描 -- 将 {@code com.lu.postrobotsystem.mapper} 包下的接口注入 Spring 容器</li>
- * </ul>
- * </p>
- *
- * @author lu
- * @since 1.0.0
  */
 @Configuration
 @MapperScan("com.lu.postrobotsystem.mapper")

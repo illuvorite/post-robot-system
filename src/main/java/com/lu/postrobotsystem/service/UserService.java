@@ -3,29 +3,17 @@ package com.lu.postrobotsystem.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.lu.postrobotsystem.model.entity.User;
+import com.lu.postrobotsystem.model.request.user.UserEditRequest;
 import com.lu.postrobotsystem.model.request.user.UserQueryRequest;
 import com.lu.postrobotsystem.model.response.user.UserLoginResponse;
 import com.lu.postrobotsystem.model.response.user.UserResponse;
+import com.lu.postrobotsystem.service.impl.UserServiceImpl;
 import jakarta.servlet.http.HttpServletRequest;
 
 import java.util.List;
 
 /**
  * 用户服务接口
- * <p>
- * 定义用户认证与管理的核心业务操作，包括：登录、注册、注销、令牌刷新、当前用户获取等。
- * 采用 JWT（双令牌：accessToken + refreshToken） + Redis 的认证方案，实现无状态、可扩展的用户鉴权体系。
- * </p>
- *
- * <p>
- * <b>认证流程概要：</b><br>
- * 登录（userLogin） → 生成 accessToken（短期有效） + refreshToken（长期有效）→ 存入 Redis 会话<br>
- * 请求鉴权 → 从请求头提取 accessToken → 校验 JWT 签名 → 校验 Redis 会话 → 放行<br>
- * 令牌刷新（refreshToken）→ 用 refreshToken 换取新双令牌 → 旧 refreshToken 作废<br>
- * 注销（userLogout） → 删除 Redis 会话 → 将 accessToken 加入黑名单
- * </p>
- *
- * @see UserServiceImpl
  */
 public interface UserService extends IService<User> {
 
@@ -118,6 +106,20 @@ public interface UserService extends IService<User> {
      * @return 用户视图对象列表，若入参为空则返回空列表
      */
     List<UserResponse> getUserVOList(List<User> userList);
+
+    /**
+     * 编辑用户信息/修改密码。
+     * <p>
+     * 权限校验：管理员可编辑任意用户，普通用户只能编辑自己的信息。
+     * 仅当请求中提供了新值时才覆盖对应字段，避免空值覆盖已有数据。
+     * 修改密码时需要验证当前密码的正确性。
+     * </p>
+     *
+     * @param request        编辑请求体，包含要修改的字段
+     * @param currentUserId  当前登录用户的 ID
+     * @param isAdmin        当前用户是否为管理员
+     */
+    void updateUser(UserEditRequest request, Long currentUserId, boolean isAdmin);
 
     /**
      * 构建用户查询的 MyBatis-Plus 条件构造器

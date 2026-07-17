@@ -6,7 +6,9 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.lu.postrobotsystem.common.Result;
 import com.lu.postrobotsystem.exception.ThrowUtils;
 import com.lu.postrobotsystem.model.entity.Inventory;
+import com.lu.postrobotsystem.model.request.inventory.InventoryAdjustRequest;
 import com.lu.postrobotsystem.model.request.inventory.InventoryQueryRequest;
+import com.lu.postrobotsystem.model.request.inventory.VisionInspectRequest;
 import com.lu.postrobotsystem.model.response.inventory.InventoryResponse;
 import com.lu.postrobotsystem.service.InventoryService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -22,17 +24,6 @@ import static com.lu.postrobotsystem.exception.ResultCode.PARAM_ERROR;
 
 /**
  * 库存管理控制器。
- * <p>
- * 负责处理商品库存相关的 HTTP 请求，涵盖库存查询、入库、出库、锁定、释放和扣减等操作。
- * 该控制器是订单履约流程中库存环节的核心入口，与订单系统和支付系统存在调用关系：
- * <ul>
- *   <li>下单时调用 {@code /lock} 锁定库存</li>
- *   <li>取消订单或超时回滚调用 {@code /release} 释放库存</li>
- *   <li>支付成功后调用 {@code /deduct} 扣减锁定库存</li>
- * </ul>
- * 库存管理的业务实现委托给 {@link InventoryService}。
- * 管理端接口（查询、入库、出库）要求 ADMIN 或 OPERATOR 角色权限。
- * </p>
  */
 @RestController
 @RequestMapping("/inventory")
@@ -209,5 +200,66 @@ public class InventoryController {
         // 扣减失败时抛异常
         ThrowUtils.throwIfNot(success, "扣减锁定库存失败");
         return Result.success(null, "扣减成功");
+    }
+
+    /**
+     * 视觉巡检结果回写。
+     * <p>
+     * 机器人视觉系统完成库存巡检后，将识别到的样品状态（正常/缺失/错位）
+     * 和账实一致性标记回写到库存记录。
+     * 若巡检发现异常，会自动创建告警记录并影响商品推荐结果。
+     * </p>
+     *
+     * @param productId 商品 ID
+     * @param request   视觉巡检结果，包含样品状态和账实一致性标记
+     * @return 统一响应结果，附带"回写成功"提示
+     */
+    @PutMapping("/vision/{productId}")
+    @Operation(summary = "视觉巡检结果回写")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'MAINTAINER')")
+    public Result<Void> visionInspect(@PathVariable Long productId,
+                                      @Valid @RequestBody VisionInspectRequest request) {
+        inventoryService.visionInspect(productId, request);
+        return Result.success(null, "回写成功");
+    }
+
+    /**
+     * 手动调整库存（盘点修正）。
+     * <p>
+     * 用于盘点后人工修正库存数据。直接设定字段值而非增减，
+     * 只修改请求中传入的非空字段，未传的保持原样。
+     * 支持调整：实时库存、锁定库存、低库存阈值、样品状态、账实一致性标记。
+     * 仅 ADMIN 和 OPERATOR 角色可访问。
+     * </p>
+     *
+     * @param request 调整请求，包含商品 ID 和需要修改的字段
+     * @return 统一响应结果，附带"调整成功"提示
+     */
+    @PutMapping("/adjust")
+    @Operation(summary = "手动调整库存（盘点修正）")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    public Result<Void> adjustStock(@Valid @RequestBody InventoryAdjustRequest request) {
+        inventoryService.adjustStock(request);
+        return Result.success(null, "调整成功");
+    }
+
+    /**
+     * 删除库存记录（逻辑删除）。
+     * <p>
+     * 将指定商品的库存记录标记为已删除（逻辑删除），同时清理 Redis 缓存。
+     * 前置校验：商品 ID 不能为空，对应库存记录必须存在。
+     * 仅 ADMIN 角色可访问。
+     * </p>
+     *
+     * @param productId 商品 ID
+     * @return 统一响应结果，附带"删除成功"提示
+     */
+    @DeleteMapping("/delete/{productId}")
+    @Operation(summary = "删除库存记录（逻辑删除）")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Result<Void> deleteInventory(@PathVariable Long productId) {
+        ThrowUtils.throwIf(ObjectUtil.isNull(productId), PARAM_ERROR, "商品ID不能为空");
+        inventoryService.deleteInventory(productId);
+        return Result.success(null, "删除成功");
     }
 }

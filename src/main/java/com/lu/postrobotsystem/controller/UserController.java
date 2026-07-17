@@ -2,7 +2,6 @@ package com.lu.postrobotsystem.controller;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.ObjectUtil;
-import cn.hutool.core.util.StrUtil;
 import cn.hutool.crypto.digest.BCrypt;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -29,15 +28,6 @@ import static com.lu.postrobotsystem.exception.ResultCode.PARAM_ERROR;
 
 /**
  * 用户管理控制器。
- * <p>
- * 负责处理用户管理相关的 HTTP 请求，包括用户查询、个人信息编辑、密码修改、用户删除和新增用户。
- * 该控制器是系统用户模块的管理入口，与 {@link UserService} 协作完成业务逻辑。
- * 区分普通用户和管理员权限：
- * <ul>
- *   <li>普通用户可以查询和编辑个人信息</li>
- *   <li>管理员可以分页查询用户列表、删除用户和新增用户</li>
- * </ul>
- * </p>
  */
 @RestController
 @RequestMapping("/user")
@@ -139,54 +129,24 @@ public class UserController {
     /**
      * 编辑个人信息/修改密码。
      * <p>
-     * 当前登录用户可以修改自己的真实姓名、手机号、邮箱和密码。
-     * 权限控制：只能修改自己的信息，不能修改他人信息。
-     * 修改密码时需要验证当前密码的正确性，新密码长度不能少于 6 位。
-     * 密码使用 BCrypt 加密存储。
+     * 权限控制：管理员可编辑任意用户，普通用户只能编辑自己的信息。
+     * 仅当请求中提供了新值时才覆盖对应字段，避免空值覆盖已有数据。
+     * 业务逻辑委托给 {@link UserService#updateUser} 处理。
      * </p>
      *
      * @param request        编辑请求体，可包含 id、realName、phone、email、password、newPassword
-     * @param authentication 当前认证信息，用于获取当前用户 ID
+     * @param authentication 当前认证信息，用于获取当前用户 ID 和角色
      * @return 统一响应结果，附带"更新成功"提示
-     * @throws BusinessException 如果不是修改自己的信息，抛出 FORBIDDEN 异常
-     * @throws RuntimeException  如果当前密码错误或新密码格式不符合要求，抛出 PARAM_ERROR 异常
      */
     @PutMapping("/edit")
     @Operation(summary = "编辑个人信息/修改密码")
     public Result<Void> updateUser(@Valid @RequestBody UserEditRequest request,
                                    Authentication authentication) {
-        // 从认证信息中提取当前用户 ID
         Long currentUserId = Long.parseLong(authentication.getName());
-        ThrowUtils.throwIf(ObjectUtil.isNull(currentUserId), PARAM_ERROR, "当前用户ID不能为空");
+        boolean isAdmin = authentication.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_" + UserRoleEnum.ADMIN.getValue()));
 
-        // 确定目标用户 ID：request 中未指定则默认为当前用户
-        Long targetId = ObjectUtil.defaultIfNull(request.getId(), currentUserId);
-        // 权限校验：只能编辑自己的信息
-        ThrowUtils.throwIf(!currentUserId.equals(targetId), ResultCode.FORBIDDEN, "无权限修改其他用户信息");
-
-        // 查询目标用户实体
-        User user = userService.getById(targetId);
-        ThrowUtils.throwIf(ObjectUtil.isNull(user), PARAM_ERROR, "用户不存在");
-
-        // 更新基本信息：真实姓名、手机号、邮箱（仅当请求中提供了新值时覆盖）
-        if (StrUtil.isNotBlank(request.getRealName())) user.setRealName(request.getRealName());
-        if (StrUtil.isNotBlank(request.getPhone())) user.setPhone(request.getPhone());
-        if (StrUtil.isNotBlank(request.getEmail())) user.setEmail(request.getEmail());
-
-        // 处理密码修改逻辑
-        if (StrUtil.isNotBlank(request.getNewPassword())) {
-            // 验证当前密码不能为空
-            ThrowUtils.throwIf(StrUtil.isBlank(request.getPassword()), PARAM_ERROR, "当前密码不能为空");
-            // 验证当前密码是否正确（使用 BCrypt 校验）
-            ThrowUtils.throwIf(!BCrypt.checkpw(request.getPassword(), user.getPassword()), PARAM_ERROR, "当前密码错误");
-            // 验证新密码长度是否符合要求
-            ThrowUtils.throwIf(request.getNewPassword().length() < 6, PARAM_ERROR, "新密码长度不能少于6位");
-            // BCrypt 加密新密码并更新
-            user.setPassword(BCrypt.hashpw(request.getNewPassword()));
-        }
-
-        // 持久化更新到数据库
-        userService.updateById(user);
+        userService.updateUser(request, currentUserId, isAdmin);
         return Result.success(null, "更新成功");
     }
 
@@ -220,31 +180,35 @@ public class UserController {
     /**
      * 新增用户（管理员专用）。
      * <p>
-     * 管理员可以为系统添加新用户。
-     * 请求中只需提供用户名等基本信息，密码默认初始化为 "123456"（BCrypt 加密），
-     * 用户状态默认设置为启用（status=1）。
+     * 管理员可以为系统添加新用户，需提供用户名和角色等必填信息。
+     * 密码默认为 "123456"（BCrypt 加密），用户状态默认启用（status=1）。
      * 仅 ADMIN 角色可访问。
      * </p>
      *
-     * @param request 新增用户请求体，包含用户名等基本信息
+     * @param request 新增用户请求体，包含用户名、角色等必填信息
      * @return 统一响应结果，包含新用户的 ID，附带"新增成功"提示
-     * @throws RuntimeException 如果请求为空或用户名为空，抛出 PARAM_ERROR 异常
+     * @throws BusinessException 如果账号已存在，抛出 DATA_ALREADY_EXIST 异常
      */
     @PostMapping("/add")
     @Operation(summary = "新增用户（管理员）")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<Long> addUser(@Valid @RequestBody UserAddRequest request) {
-        // 前置校验：请求体和用户名不能为空
-        ThrowUtils.throwIf(ObjectUtil.isNull(request), PARAM_ERROR, "新增请求不能为空");
-        ThrowUtils.throwIf(StrUtil.isBlank(request.getUsername()), PARAM_ERROR, "账号不能为空");
+        // 检查账号是否已被注册
+        boolean exists = userService.lambdaQuery()
+                .eq(User::getUsername, request.getUsername())
+                .eq(User::getIsDeleted, 0)
+                .count() > 0;
+        ThrowUtils.throwIf(exists, ResultCode.DATA_ALREADY_EXIST, "账号已存在");
 
         // 从请求中复制属性到 User 实体（排除 password 字段，使用默认密码）
         User user = new User();
         BeanUtil.copyProperties(request, user, "password");
-        // 设置默认密码 "123456"（BCrypt 加密）
+        // 默认密码 "123456"（BCrypt 加密）
         user.setPassword(BCrypt.hashpw("123456"));
         // 默认启用状态
         user.setStatus(1);
+        // 显式设置未删除（避免 @TableLogic 查不到新用户）
+        user.setIsDeleted(0);
 
         // 保存用户到数据库
         userService.save(user);

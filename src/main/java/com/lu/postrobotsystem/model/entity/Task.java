@@ -1,6 +1,8 @@
 package com.lu.postrobotsystem.model.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.lu.postrobotsystem.model.enums.TaskStatusEnum;
+import com.lu.postrobotsystem.model.enums.TaskTypeEnum;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -40,12 +42,12 @@ public class Task implements Serializable {
     /** 任务类型（NAVIGATION-导航 / GRASP-抓取 / DISPLAY-展示 / EXPLAIN-讲解 / SETTLEMENT-结算 / INVENTORY_CHECK-库存巡检 / PATROL-巡检 / OTHER-其他），参见 TaskTypeEnum */
     @TableField("task_type")
     @Schema(description = "任务类型（NAVIGATION/GRASP/DISPLAY/EXPLAIN/SETTLEMENT/INVENTORY_CHECK/PATROL/OTHER）")
-    private String taskType;
+    private TaskTypeEnum taskType;
 
     /** 任务状态（CREATED-已创建 / QUEUED-已排队 / RUNNING-执行中 / PAUSED-已暂停 / SUCCEEDED-已完成 / FAILED-失败 / CANCELLED-已取消 / MANUAL_REQUIRED-需人工处理），参见 TaskStatusEnum */
     @TableField("status")
     @Schema(description = "任务状态（CREATED/QUEUED/RUNNING/PAUSED/SUCCEEDED/FAILED/CANCELLED/MANUAL_REQUIRED）")
-    private String status;
+    private TaskStatusEnum status;
 
     /** 优先级（1-10，1为最高优先级），用于任务调度排序 */
     @TableField("priority")

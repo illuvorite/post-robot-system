@@ -11,35 +11,7 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 
-/**
- * 管理员初始化器
- * <p>
- * 实现了 {@link ApplicationRunner} 接口，在 Spring Boot 应用启动完成后自动执行。
- * 用于检查数据库中是否存在管理员账号，如果不存在则创建默认管理员。
- * 确保系统首次部署后可以直接使用管理员账号登录。
- * </p>
- *
- * <p><b>执行时机：</b>
- * Spring 容器初始化完成后 -> {@link PostRobotSystemApplication#main} 启动 ->
- * {@code AdminInitializer.run()} 被自动调用。
- * </p>
- *
- * <p><b>默认管理员信息：</b>
- * <ul>
- *   <li>用户名：admin</li>
- *   <li>密码：admin123（BCrypt 加密存储）</li>
- *   <li>角色：ADMIN</li>
- * </ul>
- * </p>
- *
- * <p><b>幂等性：</b>
- * 如果数据库中已存在管理员角色且未删除的记录，则跳过初始化操作，
- * 保证多次启动不会重复创建。
- * </p>
- *
- * @author lu
- * @since 1.0.0
- */
+
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -75,7 +47,8 @@ public class AdminInitializer implements ApplicationRunner {
                     .setRealName("系统管理员")               // 设置真实姓名
                     .setPassword(BCrypt.hashpw("admin123")) // 使用 BCrypt 对密码进行加密
                     .setRole(UserRoleEnum.ADMIN)            // 设置角色为管理员
-                    .setStatus(1);                          // 设置状态为启用（1=启用，0=禁用）
+                    .setStatus(1)                           // 设置状态为启用（1=启用，0=禁用）
+                    .setIsDeleted(0);                       // 显式设置未删除，避免 @TableLogic 查不到
             // 将管理员记录插入数据库
             userMapper.insert(admin);
             // 记录初始化日志，通知运维人员默认账号信息

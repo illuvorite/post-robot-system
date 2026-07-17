@@ -1,6 +1,7 @@
 package com.lu.postrobotsystem.model.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.lu.postrobotsystem.model.enums.OrderStatusEnum;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -52,7 +53,7 @@ public class Orders implements Serializable {
     /** 订单状态（PENDING_PAY-待支付 / PAYING-支付中 / PAID-支付成功 / FAILED-支付失败 / CANCELLED-已取消 / TIMEOUT-已超时 / MANUAL_REQUIRED-需人工处理），参见 OrderStatusEnum */
     @TableField("status")
     @Schema(description = "订单状态（PENDING_PAY/PAYING/PAID/FAILED/CANCELLED/TIMEOUT/MANUAL_REQUIRED）")
-    private String status;
+    private OrderStatusEnum status;
 
     /** 关联的邮件号码，用于物流追踪 */
     @TableField("mail_no")

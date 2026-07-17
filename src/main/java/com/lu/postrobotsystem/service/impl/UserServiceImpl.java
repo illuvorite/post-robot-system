@@ -15,6 +15,7 @@ import com.lu.postrobotsystem.exception.ThrowUtils;
 import com.lu.postrobotsystem.mapper.UserMapper;
 import com.lu.postrobotsystem.model.entity.User;
 import com.lu.postrobotsystem.model.enums.UserRoleEnum;
+import com.lu.postrobotsystem.model.request.user.UserEditRequest;
 import com.lu.postrobotsystem.model.request.user.UserQueryRequest;
 import com.lu.postrobotsystem.model.response.user.UserLoginResponse;
 import com.lu.postrobotsystem.model.response.user.UserResponse;
@@ -36,62 +37,6 @@ import static com.lu.postrobotsystem.exception.ResultCode.PARAM_ERROR;
 
 /**
  * 用户服务实现类
- * <p>
- * 实现用户认证与管理的全部业务逻辑。系统采用 <b>JWT 双令牌 + Redis 缓存</b>的认证架构：
- * </p>
- *
- * <p>
- * <b>认证架构说明：</b><br>
- * <ul>
- *   <li><b>accessToken（短期令牌）：</b>有效期较短（由 JwtUtils 配置），用于接口鉴权。存储在 Redis 会话中，支持服务端主动失效。</li>
- *   <li><b>refreshToken（刷新令牌）：</b>有效期较长，用于无感刷新 accessToken。采用令牌轮换机制，每次刷新旧令牌立即失效。</li>
- *   <li><b>黑名单机制：</b>用户注销时，accessToken 会被加入 Redis 黑名单，在剩余有效期内不可用。</li>
- * </ul>
- * </p>
- *
- * <p>
- * <b>核心业务流程与方法调用关系：</b><br>
- * <pre>
- * ┌─ 登录 ──────────────────────────────────────────────────┐
- * │ userLogin()                                              │
- * │   ├─ 多条件查询用户（用户名 / 邮箱 / 手机号）             │
- * │   ├─ BCrypt 校验密码                                      │
- * │   └─ buildLoginResponse()                                │
- * │        ├─ jwtUtils.generateAccessToken()                 │
- * │        ├─ jwtUtils.generateRefreshToken()                │
- * │        ├─ 存 Redis：LOGIN_TOKEN_KEY + accessToken → 会话  │
- * │        └─ 存 Redis：LOGIN_REFRESH_KEY + refreshToken → 用户ID│
- * │                                                          │
- * ├─ 注册 ────────────────────────────────────────────────────┤
- * │ userRegister()                                           │
- * │   ├─ 参数校验（密码一致性、长度等）                       │
- * │   ├─ 账号查重                                            │
- * │   └─ BCrypt 加密 → save                                  │
- * │                                                          │
- * ├─ 注销 ────────────────────────────────────────────────────┤
- * │ userLogout()                                             │
- * │   ├─ 删除 Redis 会话                                     │
- * │   └─ 将 accessToken 加入黑名单（TTL = 剩余有效期）         │
- * │                                                          │
- * ├─ 令牌刷新 ────────────────────────────────────────────────┤
- * │ refreshToken()                                           │
- * │   ├─ 校验 refreshToken 签名                               │
- * │   ├─ 校验 Redis 映射                                      │
- * │   ├─ 删除旧 refreshToken                                  │
- * │   └─ buildLoginResponse() 生成新双令牌                    │
- * │                                                          │
- * └─ 获取当前用户 ────────────────────────────────────────────┤
- *   getLoginUser()                                           │
- *     ├─ extractToken() 从请求头提取 Bearer token             │
- *     ├─ 检查黑名单                                           │
- *     ├─ 检查 Redis 会话                                      │
- *     └─ 检查用户状态（存在、未删除、未停用）                  │
- * </pre>
- * </p>
- *
- * @see UserService
- * @see UserMapper
- * @see JwtUtils
  */
 @Slf4j
 @Service
@@ -105,22 +50,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 用户登录
-     * <p>
-     * 业务流程：<br>
-     * 1. 校验参数（账号/邮箱/手机号至少一个不为空，密码不为空）<br>
-     * 2. 根据登录方式构造查询条件（用户名 / 邮箱 / 手机号三选一）<br>
-     * 3. 查询用户并校验：用户是否存在、账号是否停用<br>
-     * 4. BCrypt 校验密码<br>
-     * 5. 调用 {@link #buildLoginResponse(User, String)} 生成双令牌并存储 Redis 会话
-     * </p>
-     * <p>调用链路：AuthController.login → this.userLogin → 查询用户 → 校验密码 → buildLoginResponse → 返回令牌</p>
-     *
-     * @param userAccount  用户名
-     * @param userEmail    邮箱
-     * @param userPhone    手机号
-     * @param userPassword 登录密码
-     * @param request      HTTP 请求（用于记录客户端 IP）
-     * @return 登录响应，包含用户信息和双令牌
      */
     @Override
     public UserLoginResponse userLogin(String userAccount, String userEmail, String userPhone,
@@ -194,7 +123,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                 .setUsername(userAccount)
                 .setPassword(BCrypt.hashpw(userPassword))    // BCrypt 加密（不可逆）
                 .setRole(UserRoleEnum.OPERATOR)              // 默认角色：操作员
-                .setStatus(1);                                // 默认状态：启用
+                .setStatus(1)                                // 默认状态：启用
+                .setIsDeleted(0);                            // 显式设置未删除
         save(user);
         return user.getId();
     }
@@ -362,6 +292,61 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         return userList.stream().map(this::getUserVO).collect(Collectors.toList());
     }
 
+    // ==================== 编辑用户 ====================
+
+    /**
+     * 编辑用户信息/修改密码。
+     * <p>
+     * 权限校验：管理员可编辑任意用户，普通用户只能编辑自己的信息。
+     * 仅当请求中提供了新值时才覆盖对应字段（如真实姓名、手机号、邮箱等），避免空值覆盖已有数据。
+     * 修改密码时需要验证当前密码的正确性，新密码长度不能少于 6 位，密码使用 BCrypt 加密存储。
+     * </p>
+     *
+     * @param request        编辑请求体，可包含 id、realName、phone、email、password、newPassword
+     * @param currentUserId  当前登录用户的 ID
+     * @param isAdmin        当前用户是否为管理员
+     */
+    @Override
+    public void updateUser(UserEditRequest request, Long currentUserId, boolean isAdmin) {
+        // 确定目标用户 ID：request 中未指定则默认为当前用户
+        Long targetId = ObjectUtil.defaultIfNull(request.getId(), currentUserId);
+
+        // 权限校验：管理员可编辑任意用户，普通用户只能编辑自己
+        if (!isAdmin) {
+            ThrowUtils.throwIf(!currentUserId.equals(targetId), ResultCode.FORBIDDEN, "无权限修改其他用户信息");
+        }
+
+        // 查询目标用户实体
+        User user = getById(targetId);
+        ThrowUtils.throwIf(ObjectUtil.isNull(user), PARAM_ERROR, "用户不存在");
+
+        // 更新基本信息：真实姓名、手机号、邮箱、角色（仅当请求中提供了新值时覆盖）
+        if (StrUtil.isNotBlank(request.getRealName())) user.setRealName(request.getRealName());
+        if (StrUtil.isNotBlank(request.getPhone())) user.setPhone(request.getPhone());
+        if (StrUtil.isNotBlank(request.getEmail())) user.setEmail(request.getEmail());
+
+        // 处理角色修改：仅管理员可修改角色
+        if (ObjectUtil.isNotNull(request.getRole())) {
+            ThrowUtils.throwIf(!isAdmin, ResultCode.FORBIDDEN, "无权限修改用户角色");
+            user.setRole(request.getRole());
+        }
+
+        // 处理密码修改逻辑
+        if (StrUtil.isNotBlank(request.getNewPassword())) {
+            // 验证当前密码不能为空
+            ThrowUtils.throwIf(StrUtil.isBlank(request.getPassword()), PARAM_ERROR, "当前密码不能为空");
+            // 验证当前密码是否正确（使用 BCrypt 校验）
+            ThrowUtils.throwIf(!BCrypt.checkpw(request.getPassword(), user.getPassword()), PARAM_ERROR, "当前密码错误");
+            // 验证新密码长度是否符合要求
+            ThrowUtils.throwIf(request.getNewPassword().length() < 6, PARAM_ERROR, "新密码长度不能少于6位");
+            // BCrypt 加密新密码并更新
+            user.setPassword(BCrypt.hashpw(request.getNewPassword()));
+        }
+
+        // 持久化更新到数据库
+        updateById(user);
+    }
+
     // ==================== 查询条件构造 ====================
 
     /**
@@ -388,6 +373,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             wrapper.like(StrUtil.isNotBlank(query.getRealName()), "real_name", query.getRealName());
             // 手机号模糊搜索
             wrapper.like(StrUtil.isNotBlank(query.getPhone()), "phone", query.getPhone());
+            // 邮箱模糊搜索
+            wrapper.like(StrUtil.isNotBlank(query.getEmail()), "email", query.getEmail());
             // 角色精确匹配
             wrapper.eq(ObjectUtil.isNotNull(query.getRole()), "role", query.getRole());
             // 状态精确匹配

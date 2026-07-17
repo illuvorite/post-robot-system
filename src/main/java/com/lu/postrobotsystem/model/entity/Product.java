@@ -1,6 +1,7 @@
 package com.lu.postrobotsystem.model.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.lu.postrobotsystem.model.enums.ProductStatusEnum;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -76,7 +77,7 @@ public class Product implements Serializable {
     /** 商品状态（0-下架 / 1-上架），参见 ProductStatusEnum */
     @TableField("status")
     @Schema(description = "状态（0-下架 1-上架）")
-    private Integer status;
+    private ProductStatusEnum status;
 
     /** 记录创建时间 */
     @TableField(value = "create_time", fill = FieldFill.INSERT)

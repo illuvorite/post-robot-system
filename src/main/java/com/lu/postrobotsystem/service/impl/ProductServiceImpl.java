@@ -7,10 +7,16 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.lu.postrobotsystem.exception.ThrowUtils;
+import com.lu.postrobotsystem.mapper.AlertMapper;
 import com.lu.postrobotsystem.mapper.InventoryMapper;
 import com.lu.postrobotsystem.mapper.ProductMapper;
+import com.lu.postrobotsystem.model.entity.Alert;
 import com.lu.postrobotsystem.model.entity.Inventory;
 import com.lu.postrobotsystem.model.entity.Product;
+import com.lu.postrobotsystem.model.enums.AlertStatusEnum;
+import com.lu.postrobotsystem.model.enums.AlertTypeEnum;
+import com.lu.postrobotsystem.model.enums.ProductStatusEnum;
+import com.lu.postrobotsystem.model.enums.SampleStatusEnum;
 import com.lu.postrobotsystem.model.request.product.ProductCreateRequest;
 import com.lu.postrobotsystem.model.request.product.ProductQueryRequest;
 import com.lu.postrobotsystem.model.request.product.ProductRecommendRequest;
@@ -63,6 +69,7 @@ import static com.lu.postrobotsystem.exception.ResultCode.*;
 public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> implements ProductService {
 
     private final InventoryMapper inventoryMapper;
+    private final AlertMapper alertMapper;
 
     // ==================== 商品 CRUD ====================
 
@@ -73,9 +80,10 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
      * 1. 校验请求参数和商品名称是否为空<br>
      * 2. 检查商品名称是否已存在（同一名称不允许重复）<br>
      * 3. 构造 Product 实体，设置默认状态为下架（status=0）<br>
-     * 4. 保存到数据库
+     * 4. 保存到数据库<br>
+     * 5. 自动创建库存记录（初始库存为 0，后续通过入库接口增加）
      * </p>
-     * <p>调用链路：Controller → this.createProduct → 参数校验 → 名称查重 → save → 返回 ID</p>
+     * <p>调用链路：Controller → this.createProduct → 参数校验 → 名称查重 → save → 初始化库存 → 返回 ID</p>
      *
      * @param request 商品创建请求
      * @return 新增商品的 ID
@@ -105,10 +113,22 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
                 .setImageUrl(request.getImageUrl())
                 .setRobotGraspable(ObjectUtil.defaultIfNull(request.getRobotGraspable(), false))  // 默认不支持机器人抓取
                 .setDisplayPoint(request.getDisplayPoint())
-                .setStatus(0); // 0=下架（新建商品默认下架，需手动上架）
+                .setStatus(ProductStatusEnum.OFF_SHELF); // 0=下架（新建商品默认下架，需手动上架）
 
         // === 保存到数据库 ===
         save(product);
+
+        // === 自动创建库存记录（初始为 0，后续通过入库操作增加） ===
+        Inventory inventory = new Inventory()
+                .setProductId(product.getId())
+                .setRealStock(0)
+                .setLockedStock(0)
+                .setLowStockThreshold(10)
+                .setSampleStatus(SampleStatusEnum.NORMAL)
+                .setMismatchFlag(false);
+        inventoryMapper.insert(inventory);
+        log.info("库存记录已初始化: productId={}", product.getId());
+
         log.info("新增商品成功: id={}, name={}", product.getId(), product.getName());
         return product.getId();
     }
@@ -156,7 +176,10 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         if (StrUtil.isNotBlank(request.getImageUrl())) product.setImageUrl(request.getImageUrl());
         if (ObjectUtil.isNotNull(request.getRobotGraspable())) product.setRobotGraspable(request.getRobotGraspable());
         if (StrUtil.isNotBlank(request.getDisplayPoint())) product.setDisplayPoint(request.getDisplayPoint());
-        if (ObjectUtil.isNotNull(request.getStatus())) product.setStatus(request.getStatus());
+        if (ObjectUtil.isNotNull(request.getStatus())) {
+            ProductStatusEnum statusEnum = ProductStatusEnum.getEnumByCode(request.getStatus());
+            if (statusEnum != null) product.setStatus(statusEnum);
+        }
 
         // === 保存更新 ===
         updateById(product);
@@ -191,10 +214,36 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         ThrowUtils.throwIf(status != 0 && status != 1, PARAM_VALUE_INVALID, "状态值不合法（0-下架 1-上架）");
 
         // === 更新状态 ===
-        product.setStatus(status);
+        product.setStatus(ProductStatusEnum.getEnumByCode(status));
         updateById(product);
         log.info("商品状态变更: id={}, status={}", id, status);
         return null;
+    }
+
+    // ==================== 标签维护 ====================
+
+    /**
+     * 更新商品标签。
+     * <p>
+     * 专门用于更新商品标签的接口，与全量编辑分离。
+     * 前端可以只传标签字段进行局部更新。
+     * </p>
+     *
+     * @param id   商品ID
+     * @param tags 标签字符串（逗号分隔）
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateTags(Long id, String tags) {
+        ThrowUtils.throwIf(ObjectUtil.isNull(id), PARAM_ERROR, "商品ID不能为空");
+        ThrowUtils.throwIf(StrUtil.isBlank(tags), PARAM_ERROR, "标签不能为空");
+
+        Product product = getById(id);
+        ThrowUtils.throwIf(ObjectUtil.isNull(product), NOT_FOUND, "商品不存在");
+
+        product.setTags(tags.trim());
+        updateById(product);
+        log.info("商品标签更新成功: id={}, tags={}", id, tags);
     }
 
     // ==================== VO 转换 ====================
@@ -211,6 +260,9 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         if (ObjectUtil.isNull(product)) return null;
         ProductResponse vo = new ProductResponse();
         BeanUtil.copyProperties(product, vo);
+        if (product.getStatus() != null) {
+            vo.setStatus(product.getStatus().getCode());
+        }
         return vo;
     }
 
@@ -258,7 +310,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         // ========== 步骤 1：查询所有上架商品 ==========
         List<Product> allProducts = baseMapper.selectList(
                 new LambdaQueryWrapper<Product>()
-                        .eq(Product::getStatus, 1)      // 仅上架商品
+                        .eq(Product::getStatus, ProductStatusEnum.ON_SHELF)      // 仅上架商品
                         .eq(Product::getIsDeleted, 0)); // 未删除
 
         if (ObjectUtil.isEmpty(allProducts)) {
@@ -285,7 +337,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
                     if (inv == null) return false;                       // 无库存记录 → 不可售
                     int availableStock = inv.getRealStock() - inv.getLockedStock();
                     return availableStock > 0                            // 有可用库存
-                            && !"MISSING".equals(inv.getSampleStatus()) // 样品未缺失
+                            && inv.getSampleStatus() != SampleStatusEnum.MISSING // 样品未缺失
                             && !Boolean.TRUE.equals(inv.getMismatchFlag()); // 账实一致
                 })
                 .collect(Collectors.toList());
@@ -293,6 +345,19 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         if (ObjectUtil.isEmpty(available)) {
             return Collections.emptyList();
         }
+
+        // ========== 步骤 3b：查询低库存告警列表，用于评分扣减 ==========
+        Set<Long> lowStockAlertProductIds = alertMapper.selectList(
+                        new LambdaQueryWrapper<Alert>()
+                                .eq(Alert::getAlertType, AlertTypeEnum.LOW_STOCK)
+                                .eq(Alert::getStatus, AlertStatusEnum.UNRESOLVED)
+                                .eq(Alert::getIsDeleted, 0))
+                .stream()
+                .map(a -> {
+                    try { return Long.parseLong(a.getSourceId()); } catch (NumberFormatException e) { return null; }
+                })
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
 
         // ========== 步骤 4：评分计算 ==========
         // 处理用户意向标签：去空白、去空
@@ -339,7 +404,12 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
                 score += 10;
             }
 
-            // 4d. 仅抓取要求过滤
+            // 4d. 低库存告警扣减（存在未解决的低库存告警时扣 20 分）
+            if (lowStockAlertProductIds.contains(p.getId())) {
+                score -= 20;
+            }
+
+            // 4e. 仅抓取要求过滤
             // 若用户要求仅展示可机器人抓取的商品，排除不支持的商品
             if (Boolean.TRUE.equals(request.getOnlyGraspable()) && !Boolean.TRUE.equals(p.getRobotGraspable())) {
                 continue;
@@ -409,9 +479,10 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
             wrapper.like(StrUtil.isNotBlank(query.getName()), "name", query.getName());
             // 标签模糊搜索
             wrapper.like(StrUtil.isNotBlank(query.getTags()), "tags", query.getTags());
-            // 机器人抓取能力匹配（Boolean 转 int）
-            wrapper.eq(ObjectUtil.isNotNull(query.getRobotGraspable()), "robot_graspable",
-                    query.getRobotGraspable() ? 1 : 0);
+            // 机器人抓取能力匹配（先判空，避免 null 拆箱 NPE）
+            if (ObjectUtil.isNotNull(query.getRobotGraspable())) {
+                wrapper.eq("robot_graspable", query.getRobotGraspable() ? 1 : 0);
+            }
             // 展示点位精确匹配
             wrapper.eq(ObjectUtil.isNotNull(query.getDisplayPoint()), "display_point", query.getDisplayPoint());
             // 状态精确匹配

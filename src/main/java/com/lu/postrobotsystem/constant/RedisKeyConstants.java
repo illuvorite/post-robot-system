@@ -2,33 +2,6 @@ package com.lu.postrobotsystem.constant;
 
 /**
  * Redis 键常量定义类
- * <p>
- * 集中管理系统内所有 Redis 缓存键的命名规范，确保键名统一、可维护。
- * 所有键均采用 "{业务域}:{用途}:" 的命名格式，便于在 Redis 中按前缀搜索和管理。
- * </p>
- *
- * <p><b>键命名约定：</b>
- * <pre>
- *   login:token:xxxx       -- 登录会话相关
- *   stock:available:xxxx   -- 库存业务相关
- * </pre>
- * </p>
- *
- * <p><b>调用关系：</b>
- * <ul>
- *   <li>{@link com.lu.postrobotsystem.config.JwtAuthenticationFilter} -- 使用 TOKEN 和 BLACKLIST 常量检查认证状态</li>
- *   <li>{@code AuthService} / {@code LoginService} -- 在登录、登出、刷新令牌时使用</li>
- *   <li>{@code StockService} -- 在库存相关操作时使用 STOCK 系列常量</li>
- * </ul>
- * </p>
- *
- * <p><b>设计说明：</b>
- * 类被声明为 final 且构造器私有，防止被继承或实例化，
- * 仅作为常量的静态持有者。
- * </p>
- *
- * @author lu
- * @since 1.0.0
  */
 public final class RedisKeyConstants {
 

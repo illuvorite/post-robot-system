@@ -1,6 +1,7 @@
 package com.lu.postrobotsystem.model.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.lu.postrobotsystem.model.enums.SampleStatusEnum;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -54,7 +55,7 @@ public class Inventory implements Serializable {
     /** 样品状态（NORMAL-正常 / MISSING-缺失 / DISPLACED-错位），参见 SampleStatusEnum */
     @TableField("sample_status")
     @Schema(description = "样品状态（NORMAL-正常 MISSING-缺失 DISPLACED-错位）")
-    private String sampleStatus;
+    private SampleStatusEnum sampleStatus;
 
     /** 账实不一致标记（false-一致 / true-异常），标识系统库存与实际盘点是否匹配 */
     @TableField("mismatch_flag")

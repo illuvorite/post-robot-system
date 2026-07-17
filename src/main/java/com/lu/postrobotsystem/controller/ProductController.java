@@ -9,6 +9,7 @@ import com.lu.postrobotsystem.model.entity.Product;
 import com.lu.postrobotsystem.model.request.product.ProductCreateRequest;
 import com.lu.postrobotsystem.model.request.product.ProductQueryRequest;
 import com.lu.postrobotsystem.model.request.product.ProductRecommendRequest;
+import com.lu.postrobotsystem.model.request.product.ProductTagsRequest;
 import com.lu.postrobotsystem.model.request.product.ProductUpdateRequest;
 import com.lu.postrobotsystem.model.response.product.ProductRecommendItem;
 import com.lu.postrobotsystem.model.response.product.ProductResponse;
@@ -27,12 +28,6 @@ import static com.lu.postrobotsystem.exception.ResultCode.PARAM_ERROR;
 
 /**
  * 商品管理控制器。
- * <p>
- * 负责处理商品相关的 HTTP 请求，包括商品 CRUD、上下架管理以及商品推荐。
- * 作为商品模块的 REST API 入口，所有业务逻辑委托给 {@link ProductService} 执行。
- * 管理端操作（增删改查）需要 ADMIN 或 OPERATOR 角色权限，
- * 商品推荐接口对前端公开访问。
- * </p>
  */
 @RestController
 @RequestMapping("/product")
@@ -148,7 +143,7 @@ public class ProductController {
      * @param status 目标状态：1 上架，其他值下架
      * @return 统一响应结果，附带"上架成功"或"下架成功"提示
      */
-    @PatchMapping("/status/{id}")
+    @PostMapping("/status/{id}")
     @Operation(summary = "上架/下架商品")
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
     public Result<Void> changeStatus(@PathVariable Long id, @RequestParam Integer status) {
@@ -157,6 +152,24 @@ public class ProductController {
         // 根据状态码返回不同的操作成功提示
         String msg = status == 1 ? "上架成功" : "下架成功";
         return Result.success(null, msg);
+    }
+
+    /**
+     * 更新商品标签。
+     * <p>
+     * 专门用于更新商品标签的接口，与全量编辑分离。
+     * 只修改标签字段，不影响商品其他信息。
+     * </p>
+     *
+     * @param request 标签更新请求，包含商品 ID 和新的标签字符串
+     * @return 统一响应结果，附带"标签更新成功"提示
+     */
+    @PostMapping("/tags")
+    @Operation(summary = "更新商品标签")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    public Result<Void> updateTags(@Valid @RequestBody ProductTagsRequest request) {
+        productService.updateTags(request.getId(), request.getTags());
+        return Result.success(null, "标签更新成功");
     }
 
     /**

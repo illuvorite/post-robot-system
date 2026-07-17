@@ -5,30 +5,6 @@ import java.util.Base64;
 
 /**
  * 邮政接口签名工具类
- * <p>
- * 用于与邮政外部系统对接时的接口签名计算。
- * 采用 MD5 摘要算法结合 Base64 编码的方式生成签名串，
- * 确保请求数据在传输过程中不被篡改，保障接口调用的安全性。
- * </p>
- *
- * <p><b>签名算法规则：</b>
- * <ol>
- *   <li>将请求参数按照固定顺序拼接为一个原始字符串：<br>
- *       {@code ServiceCode + Version + ActionCode + TransactionID + SrcSysID + DstSysID + ReqTime + SessionBody + SecretKey}</li>
- *   <li>对拼接后的字符串计算 MD5 摘要</li>
- *   <li>对 MD5 摘要结果进行 Base64 编码，得到最终签名</li>
- * </ol>
- * </p>
- *
- * <p><b>调用关系：</b>
- * <ul>
- *   <li>由外部接口调用方（如 HTTP 请求拦截器或 Feign 客户端）在发送请求前调用 {@link #sign}</li>
- *   <li>对方系统收到请求后，使用相同的算法和密钥重新计算签名并进行比对验证</li>
- * </ul>
- * </p>
- *
- * @author lu
- * @since 1.0.0
  */
 public class SignUtil {
 

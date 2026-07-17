@@ -18,34 +18,6 @@ import java.io.IOException;
 
 /**
  * JWT 认证过滤器
- * <p>
- * 继承 {@link OncePerRequestFilter}，确保每个请求仅被过滤一次。
- * 负责从 HTTP 请求头中提取 JWT 令牌，验证其有效性，
- * 并将认证信息设置到 Spring Security 的 {@link SecurityContextHolder} 中。
- * </p>
- *
- * <p><b>过滤流程：</b>
- * <ol>
- *   <li>{@link #extractToken} -- 从请求头中提取 JWT 令牌</li>
- *   <li>{@link JwtUtils#validateToken} -- 验证令牌签名和有效期</li>
- *   <li>检查 Redis 黑名单 -- 防止已登出的令牌被复用</li>
- *   <li>检查 Redis 会话 -- 确认令牌是有效的活跃会话</li>
- *   <li>{@link JwtUtils#getAuthentication} -- 构建认证对象并设置到安全上下文</li>
- *   <li>{@code filterChain.doFilter} -- 继续执行后续过滤器链</li>
- * </ol>
- * </p>
- *
- * <p><b>调用关系：</b>
- * <ul>
- *   <li>被 {@link SecurityConfig#filterChain} 注册到过滤器链中</li>
- *   <li>内部调用 {@link JwtUtils} 进行令牌解析和认证构建</li>
- *   <li>内部调用 {@link StringRedisTemplate} 进行 Redis 会话状态检查</li>
- *   <li>配置在 {@link UsernamePasswordAuthenticationFilter} 之前执行</li>
- * </ul>
- * </p>
- *
- * @author lu
- * @since 1.0.0
  */
 @Component
 @RequiredArgsConstructor

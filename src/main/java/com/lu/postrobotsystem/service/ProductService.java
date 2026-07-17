@@ -9,6 +9,7 @@ import com.lu.postrobotsystem.model.request.product.ProductRecommendRequest;
 import com.lu.postrobotsystem.model.request.product.ProductUpdateRequest;
 import com.lu.postrobotsystem.model.response.product.ProductRecommendItem;
 import com.lu.postrobotsystem.model.response.product.ProductResponse;
+import com.lu.postrobotsystem.service.impl.ProductServiceImpl;
 
 import java.util.List;
 
@@ -67,6 +68,18 @@ public interface ProductService extends IService<Product> {
      * @return void
      */
     Void changeProductStatus(Long id, Integer status);
+
+    /**
+     * 更新商品标签。
+     * <p>
+     * 专门用于更新商品标签的接口，与全量编辑分离，
+     * 前端可以只传标签字段进行局部更新。
+     * </p>
+     *
+     * @param id   商品ID
+     * @param tags 标签字符串（逗号分隔）
+     */
+    void updateTags(Long id, String tags);
 
     /**
      * 将商品实体转换为商品视图对象（VO）

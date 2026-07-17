@@ -15,40 +15,6 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 /**
  * Spring Security 安全配置类
- * <p>
- * 作为系统的安全策略总控中心，配置以下内容：
- * </p>
- * <ul>
- *   <li><b>禁用 CSRF：</b>RESTful 无状态 API 不需要 CSRF 保护</li>
- *   <li><b>无状态会话：</b>不创建 HTTP Session，所有认证信息通过 JWT 在请求头中传递</li>
- *   <li><b>请求授权：</b>配置白名单路径（无需认证）和受保护路径</li>
- *   <li><b>JWT 过滤器：</b>注册 {@link JwtAuthenticationFilter} 在 UsernamePasswordAuthenticationFilter 之前</li>
- *   <li><b>密码编码器：</b>使用 BCrypt 算法进行密码加密和验证</li>
- *   <li><b>方法级安全：</b>启用 {@code @PreAuthorize} 等注解支持</li>
- * </ul>
- *
- * <p><b>请求授权白名单（无需认证即可访问）：</b>
- * <ul>
- *   <li>{@code /auth/**} -- 登录、注册、刷新令牌等接口</li>
- *   <li>{@code /health/**} -- 健康检查接口（用于负载均衡和监控）</li>
- *   <li>{@code /v3/api-docs/**} -- Swagger/OpenAPI 文档</li>
- *   <li>{@code /swagger-ui/**} -- Swagger UI 页面资源</li>
- *   <li>{@code /doc.html} -- Knife4j 增强文档页面</li>
- *   <li>{@code /webjars/**} -- WebJars 静态资源</li>
- * </ul>
- * </p>
- *
- * <p><b>认证流程：</b>
- * <ol>
- *   <li>请求进入 -> {@link JwtAuthenticationFilter#doFilterInternal} 尝试从请求头提取 JWT</li>
- *   <li>如果 JWT 有效 -> 设置 SecurityContext，放行请求</li>
- *   <li>如果 JWT 无效或缺失 -> 放行请求，但后续根据路径配置决定是否返回 401</li>
- *   <li>白名单路径 -> 直接放行；非白名单路径 -> 返回 401 未授权</li>
- * </ol>
- * </p>
- *
- * @author lu
- * @since 1.0.0
  */
 @Configuration
 @EnableWebSecurity

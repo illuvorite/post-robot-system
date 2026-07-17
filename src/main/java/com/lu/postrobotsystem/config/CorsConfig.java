@@ -51,7 +51,7 @@ public class CorsConfig implements WebMvcConfigurer {
                 // 允许本地开发域名和端口（仅开发环境）
                 .allowedOriginPatterns("http://localhost:*")
                 // 允许的 HTTP 方法（符合 RESTful 规范）
-                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                .allowedMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
                 // 允许所有请求头
                 .allowedHeaders("*")
                 // 暴露所有响应头给前端

@@ -1,6 +1,7 @@
 package com.lu.postrobotsystem.model.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.lu.postrobotsystem.model.enums.PaymentStatusEnum;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -61,7 +62,7 @@ public class Payment implements Serializable {
     /** 支付状态（PAYING-支付中 / SUCCESS-支付成功 / FAILED-支付失败 / REFUNDED-已退款 / PARTIAL_REFUND-部分退款），参见 PaymentStatusEnum */
     @TableField("status")
     @Schema(description = "支付状态（PAYING/SUCCESS/FAILED/REFUNDED/PARTIAL_REFUND）")
-    private String status;
+    private PaymentStatusEnum status;
 
     /** 支付金额 */
     @TableField("amount")

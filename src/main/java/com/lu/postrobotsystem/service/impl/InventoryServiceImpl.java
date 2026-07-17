@@ -7,10 +7,15 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.lu.postrobotsystem.constant.RedisKeyConstants;
 import com.lu.postrobotsystem.exception.ThrowUtils;
+import com.lu.postrobotsystem.mapper.AlertMapper;
 import com.lu.postrobotsystem.mapper.InventoryMapper;
+import com.lu.postrobotsystem.model.entity.Alert;
 import com.lu.postrobotsystem.model.entity.Inventory;
 import com.lu.postrobotsystem.model.entity.Product;
+import com.lu.postrobotsystem.model.enums.*;
+import com.lu.postrobotsystem.model.request.inventory.InventoryAdjustRequest;
 import com.lu.postrobotsystem.model.request.inventory.InventoryQueryRequest;
+import com.lu.postrobotsystem.model.request.inventory.VisionInspectRequest;
 import com.lu.postrobotsystem.model.response.inventory.InventoryResponse;
 import com.lu.postrobotsystem.service.InventoryService;
 import com.lu.postrobotsystem.service.ProductService;
@@ -73,6 +78,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
     private final StringRedisTemplate stringRedisTemplate;
     private final RedissonClient redissonClient;
     private final InventoryMapper inventoryMapper;
+    private final AlertMapper alertMapper;
 
     // Lua 脚本的 SHA 缓存（volatile 保证多线程可见性），避免每次调用重复加载脚本
     private volatile String lockScriptSha;
@@ -146,7 +152,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
                     .setRealStock(quantity)               // 实际库存设为入库数量
                     .setLockedStock(0)                     // 锁定库存初始为 0
                     .setLowStockThreshold(10)              // 低库存预警阈值默认 10
-                    .setSampleStatus("NORMAL")             // 样品状态默认正常
+                    .setSampleStatus(SampleStatusEnum.NORMAL)             // 样品状态默认正常
                     .setMismatchFlag(false);                // 账实一致标志默认 false
             save(inventory);
         } else {
@@ -209,7 +215,12 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         stringRedisTemplate.opsForValue().set(availableKey,
                 String.valueOf(inventory.getRealStock() - inventory.getLockedStock()));
 
-        log.info("商品出库成功: productId={}, quantity={}, remainingStock={}", productId, quantity, inventory.getRealStock());
+        // === 检查低库存阈值告警（用可用库存判断） ===
+        int remainingAvailable = inventory.getRealStock() - inventory.getLockedStock();
+        checkAndCreateLowStockAlert(productId, remainingAvailable, inventory.getLowStockThreshold());
+
+        log.info("商品出库成功: productId={}, quantity={}, remainingReal={}, availableStock={}",
+                productId, quantity, inventory.getRealStock(), remainingAvailable);
         return null;
     }
 
@@ -394,13 +405,225 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
                 inventory.setLockedStock(Math.max(inventory.getLockedStock() - quantity, 0));
                 inventory.setRealStock(Math.max(inventory.getRealStock() - quantity, 0));
                 inventoryMapper.updateById(inventory);
+
+                // 检查低库存阈值告警（用可用库存判断）
+                int available = inventory.getRealStock() - inventory.getLockedStock();
+                checkAndCreateLowStockAlert(productId, available, inventory.getLowStockThreshold());
             }
 
-            log.info("库存扣减成功: productId={}, quantity={}", productId, quantity);
+            log.info("库存扣减成功: productId={}, quantity={}, availableStock={}", productId, quantity, inventory.getRealStock() - inventory.getLockedStock());
             return true;
         } finally {
             lock.unlock();
         }
+    }
+
+    // ==================== 视觉巡检回写 ====================
+
+    /**
+     * 视觉巡检结果回写。
+     * <p>
+     * 机器人视觉系统完成巡检后，将识别到的样品状态和账实一致性标记回写到库存记录。
+     * 若巡检发现异常（样品缺失/错位/账实不一致），自动创建或更新告警记录。
+     * 异常商品的推荐权重会降低，确保推荐系统优先推荐正常商品。
+     * </p>
+     *
+     * @param productId 商品ID
+     * @param request   视觉巡检结果
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void visionInspect(Long productId, VisionInspectRequest request) {
+        // === 参数校验 ===
+        ThrowUtils.throwIf(ObjectUtil.isNull(productId), PARAM_ERROR, "商品ID不能为空");
+        ThrowUtils.throwIf(ObjectUtil.isNull(request), PARAM_ERROR, "巡检结果不能为空");
+
+        // 校验样品状态值合法性
+        SampleStatusEnum sampleStatus = SampleStatusEnum.getEnumByValue(request.getSampleStatus());
+        ThrowUtils.throwIf(ObjectUtil.isNull(sampleStatus), PARAM_VALUE_INVALID, "样品状态值不合法");
+
+        // === 查询库存记录 ===
+        Inventory inventory = inventoryMapper.selectOne(
+                new LambdaQueryWrapper<Inventory>()
+                        .eq(Inventory::getProductId, productId)
+                        .eq(Inventory::getIsDeleted, 0));
+        ThrowUtils.throwIf(ObjectUtil.isNull(inventory), NOT_FOUND, "该商品库存记录不存在");
+
+        // === 更新库存字段 ===
+        boolean prevMismatch = Boolean.TRUE.equals(inventory.getMismatchFlag());
+        SampleStatusEnum prevSampleStatus = inventory.getSampleStatus();
+
+        inventory.setSampleStatus(sampleStatus);
+        if (request.getMismatchFlag() != null) {
+            inventory.setMismatchFlag(request.getMismatchFlag());
+        }
+        inventory.setVisionInspectTime(java.time.LocalDateTime.now());
+        updateById(inventory);
+
+        // === 巡检异常时创建告警 ===
+        boolean hasIssue = sampleStatus != SampleStatusEnum.NORMAL
+                || Boolean.TRUE.equals(request.getMismatchFlag());
+
+        if (hasIssue) {
+            Product product = productService.getById(productId);
+            String productName = product != null ? product.getName() : "商品ID:" + productId;
+
+            StringBuilder msg = new StringBuilder("视觉巡检发现异常：");
+            if (sampleStatus == SampleStatusEnum.MISSING) {
+                msg.append("商品\"").append(productName).append("\"样品缺失");
+            } else if (sampleStatus == SampleStatusEnum.DISPLACED) {
+                msg.append("商品\"").append(productName).append("\"陈列错位");
+            }
+            if (Boolean.TRUE.equals(request.getMismatchFlag())) {
+                if (sampleStatus != SampleStatusEnum.NORMAL) msg.append("，");
+                msg.append("库存账实不一致");
+            }
+
+            // 避免重复创建相同来源的未解决告警：若已有同来源 UNRESOLVED 告警则跳过
+            Long existingAlert = alertMapper.selectCount(
+                    new LambdaQueryWrapper<Alert>()
+                            .eq(Alert::getSource, "inventory")
+                            .eq(Alert::getSourceId, String.valueOf(productId))
+                            .eq(Alert::getStatus, AlertStatusEnum.UNRESOLVED)
+                            .eq(Alert::getIsDeleted, 0));
+            if (existingAlert == 0) {
+                Alert alert = new Alert()
+                        .setAlertType(AlertTypeEnum.STOCK_DISCREPANCY)
+                        .setAlertLevel(AlertLevelEnum.WARNING)
+                        .setSource("inventory")
+                        .setSourceId(String.valueOf(productId))
+                        .setMessage(msg.toString())
+                        .setStatus(AlertStatusEnum.UNRESOLVED)
+                        .setIsDeleted(0);
+                alertMapper.insert(alert);
+                log.warn("视觉巡检异常告警已创建: productId={}, reason={}", productId, msg);
+            }
+        }
+
+        log.info("视觉巡检结果回写成功: productId={}, sampleStatus={}, mismatchFlag={}",
+                productId, sampleStatus, request.getMismatchFlag());
+    }
+
+    // ==================== 手动调整与删除 ====================
+
+    /**
+     * 手动调整库存。
+     * <p>
+     * 用于盘点后人工修正：直接设定字段值而非增减。
+     * 只修改请求中非空的字段，未传的保持原样。
+     * 调整后同步刷新 Redis 缓存。
+     * </p>
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void adjustStock(InventoryAdjustRequest request) {
+        ThrowUtils.throwIf(ObjectUtil.isNull(request), PARAM_ERROR, "调整请求不能为空");
+        ThrowUtils.throwIf(ObjectUtil.isNull(request.getProductId()), PARAM_ERROR, "商品ID不能为空");
+
+        // 查询库存记录
+        Inventory inventory = inventoryMapper.selectOne(
+                new LambdaQueryWrapper<Inventory>()
+                        .eq(Inventory::getProductId, request.getProductId())
+                        .eq(Inventory::getIsDeleted, 0));
+        ThrowUtils.throwIf(ObjectUtil.isNull(inventory), NOT_FOUND, "该商品库存记录不存在");
+
+        // 仅更新非空字段
+        if (ObjectUtil.isNotNull(request.getRealStock())) {
+            ThrowUtils.throwIf(request.getRealStock() < 0, PARAM_VALUE_INVALID, "实时库存不能为负数");
+            inventory.setRealStock(request.getRealStock());
+        }
+        if (ObjectUtil.isNotNull(request.getLockedStock())) {
+            ThrowUtils.throwIf(request.getLockedStock() < 0, PARAM_VALUE_INVALID, "锁定库存不能为负数");
+            inventory.setLockedStock(request.getLockedStock());
+        }
+        if (ObjectUtil.isNotNull(request.getLowStockThreshold())) {
+            ThrowUtils.throwIf(request.getLowStockThreshold() < 0, PARAM_VALUE_INVALID, "库存阈值不能为负数");
+            inventory.setLowStockThreshold(request.getLowStockThreshold());
+        }
+        if (StrUtil.isNotBlank(request.getSampleStatus())) {
+            SampleStatusEnum sampleStatus = SampleStatusEnum.getEnumByValue(request.getSampleStatus());
+            ThrowUtils.throwIf(ObjectUtil.isNull(sampleStatus), PARAM_VALUE_INVALID, "样品状态值不合法");
+            inventory.setSampleStatus(sampleStatus);
+        }
+        if (ObjectUtil.isNotNull(request.getMismatchFlag())) {
+            inventory.setMismatchFlag(request.getMismatchFlag());
+        }
+
+        updateById(inventory);
+
+        // 同步 Redis 缓存
+        String availableKey = RedisKeyConstants.STOCK_AVAILABLE + request.getProductId();
+        stringRedisTemplate.opsForValue().set(availableKey,
+                String.valueOf(inventory.getRealStock() - inventory.getLockedStock()));
+        stringRedisTemplate.opsForValue().set(
+                RedisKeyConstants.STOCK_LOCKED + request.getProductId(), String.valueOf(inventory.getLockedStock()));
+
+        log.info("库存手动调整成功: productId={}, realStock={}, lockedStock={}, threshold={}",
+                request.getProductId(), inventory.getRealStock(), inventory.getLockedStock(), inventory.getLowStockThreshold());
+    }
+
+    /**
+     * 删除库存记录（逻辑删除）。
+     * <p>
+     * 将库存记录的 is_deleted 置为 1，同时清理 Redis 中的库存缓存。
+     * </p>
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteInventory(Long productId) {
+        ThrowUtils.throwIf(ObjectUtil.isNull(productId), PARAM_ERROR, "商品ID不能为空");
+
+        Inventory inventory = inventoryMapper.selectOne(
+                new LambdaQueryWrapper<Inventory>()
+                        .eq(Inventory::getProductId, productId)
+                        .eq(Inventory::getIsDeleted, 0));
+        ThrowUtils.throwIf(ObjectUtil.isNull(inventory), NOT_FOUND, "该商品库存记录不存在");
+
+        // 逻辑删除
+        inventory.setIsDeleted(1);
+        updateById(inventory);
+
+        // 清理 Redis 缓存
+        stringRedisTemplate.delete(RedisKeyConstants.STOCK_AVAILABLE + productId);
+        stringRedisTemplate.delete(RedisKeyConstants.STOCK_LOCKED + productId);
+
+        log.info("库存记录已删除: productId={}", productId);
+    }
+
+    // ==================== 低库存告警 ====================
+
+    /**
+     * 检查库存是否低于阈值，若低于则创建低库存告警。
+     * <p>
+     * 在出库、扣减等库存减少操作后自动调用。
+     * 避免重复创建相同商品的未解决低库存告警。
+     * </p>
+     */
+    private void checkAndCreateLowStockAlert(Long productId, int currentStock, int threshold) {
+        if (currentStock > threshold) return;
+
+        // 检查是否已有未解决的低库存告警
+        Long existingAlert = alertMapper.selectCount(
+                new LambdaQueryWrapper<Alert>()
+                        .eq(Alert::getAlertType, AlertTypeEnum.LOW_STOCK)
+                        .eq(Alert::getSourceId, String.valueOf(productId))
+                        .eq(Alert::getStatus, AlertStatusEnum.UNRESOLVED)
+                        .eq(Alert::getIsDeleted, 0));
+        if (existingAlert > 0) return; // 已有未解决的告警，不再重复创建
+
+        Product product = productService.getById(productId);
+        String productName = product != null ? product.getName() : "商品ID:" + productId;
+
+        Alert alert = new Alert()
+                .setAlertType(AlertTypeEnum.LOW_STOCK)
+                .setAlertLevel(AlertLevelEnum.WARNING)
+                .setSource("inventory")
+                .setSourceId(String.valueOf(productId))
+                .setMessage(String.format("商品\"%s\"库存低于阈值（当前: %d, 阈值: %d）", productName, currentStock, threshold))
+                .setStatus(AlertStatusEnum.UNRESOLVED)
+                .setIsDeleted(0);
+        alertMapper.insert(alert);
+        log.warn("低库存告警已创建: productId={}, currentStock={}, threshold={}", productId, currentStock, threshold);
     }
 
     // ==================== VO 转换 ====================
@@ -428,7 +651,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         vo.setLockedStock(inventory.getLockedStock());
         vo.setAvailableStock(inventory.getRealStock() - inventory.getLockedStock());
         vo.setLowStockThreshold(inventory.getLowStockThreshold());
-        vo.setSampleStatus(inventory.getSampleStatus());
+        vo.setSampleStatus(inventory.getSampleStatus() != null ? inventory.getSampleStatus().getValue() : null);
         vo.setMismatchFlag(inventory.getMismatchFlag());
         vo.setVisionInspectTime(inventory.getVisionInspectTime());
         vo.setCreateTime(inventory.getCreateTime());
@@ -474,6 +697,20 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         // 默认只查询未删除记录
         wrapper.eq("is_deleted", 0);
         if (ObjectUtil.isNotNull(query)) {
+            // 按商品名称模糊搜索（先查 product 表获取匹配的 ID，再过滤 inventory）
+            if (StrUtil.isNotBlank(query.getProductName())) {
+                List<Product> matchedProducts = productService.list(
+                        new LambdaQueryWrapper<Product>()
+                                .like(Product::getName, query.getProductName().trim())
+                                .eq(Product::getIsDeleted, 0)
+                                .select(Product::getId));
+                if (ObjectUtil.isNotEmpty(matchedProducts)) {
+                    wrapper.in("product_id",
+                            matchedProducts.stream().map(Product::getId).collect(Collectors.toList()));
+                } else {
+                    wrapper.eq("product_id", -1); // 无匹配商品，查不出结果
+                }
+            }
             // 按商品ID精确匹配
             wrapper.eq(ObjectUtil.isNotNull(query.getProductId()), "product_id", query.getProductId());
             // 按样品状态精确匹配

@@ -140,85 +140,9 @@ public class JwtUtils {
         return Jwts.parser().setSigningKey(secret).parseClaimsJws(token).getBody();
     }
 
-    /**
-     * 从令牌中提取用户ID
-     * <p>
-     * 用户ID存储在令牌的 subject（主题）字段中，
-     * 通过 {@link #getClaims} 获取 Claims 后再提取 subject。
-     * </p>
-     *
-     * @param token JWT 令牌字符串
-     * @return 用户ID（Long 类型）
-     */
-    public Long getUserId(String token) {
-        return Long.parseLong(getClaims(token).getSubject());
-    }
-
-    /**
-     * 从令牌中提取用户名
-     * <p>
-     * 用户名存储在自定义 claim "username" 中，
-     * 通过 {@link #getClaims} 获取 Claims 后再提取。
-     * </p>
-     *
-     * @param token JWT 令牌字符串
-     * @return 用户名字符串
-     */
-    public String getUsername(String token) {
-        return getClaims(token).get("username", String.class);
-    }
-
-    /**
-     * 从令牌中提取用户角色
-     * <p>
-     * 角色名称存储在自定义 claim "role" 中，
-     * 通过 {@link #getClaims} 获取 Claims 后转换为 {@link UserRoleEnum} 枚举。
-     * </p>
-     *
-     * @param token JWT 令牌字符串
-     * @return 用户角色枚举 {@link UserRoleEnum}
-     */
-    public UserRoleEnum getRole(String token) {
-        return UserRoleEnum.getEnumByValue(getClaims(token).get("role", String.class));
-    }
-
-    /**
-     * 判断令牌是否为访问令牌（accessToken）
-     * <p>
-     * 通过检查自定义声明 "tokenType" 的值是否为 "access" 来判断。
-     * 用于区分访问令牌和刷新令牌。
-     * </p>
-     *
-     * @param token JWT 令牌字符串
-     * @return 如果是访问令牌返回 true，否则返回 false
-     */
-    public boolean isAccessToken(String token) {
-        return "access".equals(getClaims(token).get("tokenType"));
-    }
 
     /**
      * 从令牌中构建 Spring Security 认证对象
-     * <p>
-     * 将 JWT 令牌中的用户信息和角色转换为 Spring Security 的
-     * {@link Authentication} 接口实现，以便设置到安全上下文中。
-     * </p>
-     *
-     * <p><b>转换过程：</b>
-     * <ol>
-     *   <li>从令牌 Claims 中提取用户ID和角色</li>
-     *   <li>创建角色相关的 {@link SimpleGrantedAuthority} 列表</li>
-     *   <li>构建 {@link org.springframework.security.core.userdetails.User} 对象</li>
-     *   <li>返回 {@link UsernamePasswordAuthenticationToken} 对象</li>
-     * </ol>
-     * </p>
-     *
-     * <p><b>调用关系：</b>
-     * 此方法由 {@link com.lu.postrobotsystem.config.JwtAuthenticationFilter#doFilterInternal} 调用，
-     * 将认证结果设置到 {@code SecurityContextHolder} 中。
-     * </p>
-     *
-     * @param token JWT 令牌字符串
-     * @return Spring Security 认证对象，包含用户身份和权限信息
      */
     public Authentication getAuthentication(String token) {
         // 解析令牌获取全部声明

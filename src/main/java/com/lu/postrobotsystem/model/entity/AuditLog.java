@@ -1,6 +1,8 @@
 package com.lu.postrobotsystem.model.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.lu.postrobotsystem.model.enums.OperationResultEnum;
+import com.lu.postrobotsystem.model.enums.OperationTypeEnum;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -39,7 +41,7 @@ public class AuditLog implements Serializable {
     /** 操作类型，取值参见 OperationTypeEnum（LOGIN/LOGOUT/ORDER_CREATE/ORDER_PAY/...） */
     @TableField("operation_type")
     @Schema(description = "操作类型（LOGIN/LOGOUT/ORDER_CREATE/ORDER_PAY/...）")
-    private String operationType;
+    private OperationTypeEnum operationType;
 
     /** 操作对象类型（ORDER-订单 / PRODUCT-商品 / INVENTORY-库存 / TASK-任务 / USER-用户 / ALERT-告警 / SYSTEM-系统） */
     @TableField("target_type")
@@ -54,7 +56,7 @@ public class AuditLog implements Serializable {
     /** 操作结果（SUCCESS-成功 / FAIL-失败），参见 OperationResultEnum */
     @TableField("result")
     @Schema(description = "操作结果（SUCCESS/FAIL）")
-    private String result;
+    private OperationResultEnum result;
 
     /** 操作详情，记录操作前后的关键数据变化 */
     @TableField("detail")

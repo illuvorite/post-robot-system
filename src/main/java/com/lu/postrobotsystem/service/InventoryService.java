@@ -3,29 +3,16 @@ package com.lu.postrobotsystem.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.lu.postrobotsystem.model.entity.Inventory;
+import com.lu.postrobotsystem.model.request.inventory.InventoryAdjustRequest;
 import com.lu.postrobotsystem.model.request.inventory.InventoryQueryRequest;
+import com.lu.postrobotsystem.model.request.inventory.VisionInspectRequest;
 import com.lu.postrobotsystem.model.response.inventory.InventoryResponse;
 
 import java.util.List;
 
 /**
  * 库存服务接口
- * <p>
- * 定义库存管理相关的核心业务操作，包括：入库、出库、库存锁定/释放/扣减等。
- * 库存模块采用 Redis + Lua 脚本实现高并发下的原子库存操作，DB 作为持久化存储，
- * 通过 Redisson 分布式锁保证同一商品库存操作的串行化。
- * </p>
- *
- * <p>
- * <b>库存状态流转：</b><br>
- * 入库（inboundStock）     → realStock 增加<br>
- * 出库（outboundStock）    → realStock 减少（不涉及锁定）<br>
- * 下单锁定（lockStock）    → lockedStock 增加，availableStock 减少<br>
- * 取消释放（releaseStock） → lockedStock 减少，availableStock 增加<br>
- * 支付扣减（deductStock）  → lockedStock 减少，realStock 减少<br>
- * </p>
- *
- * @see InventoryServiceImpl
+
  */
 public interface InventoryService extends IService<Inventory> {
 
@@ -104,6 +91,20 @@ public interface InventoryService extends IService<Inventory> {
     boolean deductStock(Long productId, Integer quantity);
 
     /**
+     * 视觉巡检结果回写。
+     * <p>
+     * 机器人视觉系统完成库存巡检后，将识别结果回写到库存记录中，
+     * 包括样品状态（正常/缺失/错位）和账实一致性标记。
+     * 若巡检发现异常（样品缺失、错位或账实不一致），自动创建告警记录。
+     * 异常状态会联动商品推荐引擎，排除异常商品。
+     * </p>
+     *
+     * @param productId 商品ID
+     * @param request   视觉巡检结果，包含样品状态和账实一致性标记
+     */
+    void visionInspect(Long productId, VisionInspectRequest request);
+
+    /**
      * 将库存实体转换为库存视图对象（VO）
      * <p>转换过程中会补充商品名称等关联信息。</p>
      *
@@ -119,6 +120,28 @@ public interface InventoryService extends IService<Inventory> {
      * @return 库存视图对象列表，若入参为空则返回空列表
      */
     List<InventoryResponse> getInventoryVOList(List<Inventory> inventoryList);
+
+    /**
+     * 手动调整库存。
+     * <p>
+     * 用于盘点修正：直接设定 realStock / lockedStock / 阈值 / 样品状态等字段。
+     * 与入库/出库不同，adjust 是直接设值而非增减，操作后同步刷新 Redis 缓存。
+     * </p>
+     *
+     * @param request 调整请求，包含商品ID 和需要修改的字段
+     */
+    void adjustStock(InventoryAdjustRequest request);
+
+    /**
+     * 删除库存记录（逻辑删除）。
+     * <p>
+     * 当商品停售或废弃时，逻辑删除对应的库存记录。
+     * 同时清理 Redis 中的库存缓存。
+     * </p>
+     *
+     * @param productId 商品ID
+     */
+    void deleteInventory(Long productId);
 
     /**
      * 构建库存查询的 MyBatis-Plus 条件构造器

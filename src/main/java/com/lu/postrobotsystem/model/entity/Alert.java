@@ -1,6 +1,9 @@
 package com.lu.postrobotsystem.model.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.lu.postrobotsystem.model.enums.AlertLevelEnum;
+import com.lu.postrobotsystem.model.enums.AlertStatusEnum;
+import com.lu.postrobotsystem.model.enums.AlertTypeEnum;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -35,12 +38,12 @@ public class Alert implements Serializable {
     /** 告警类型，取值参见 AlertTypeEnum（LOW_STOCK/STOCK_DISCREPANCY/SAMPLE_MISSING/TASK_FAILURE/PAYMENT_TIMEOUT/NETWORK_DOWN/SYSTEM_ERROR） */
     @TableField("alert_type")
     @Schema(description = "告警类型（LOW_STOCK/STOCK_DISCREPANCY/SAMPLE_MISSING/TASK_FAILURE/PAYMENT_TIMEOUT/NETWORK_DOWN/SYSTEM_ERROR）")
-    private String alertType;
+    private AlertTypeEnum alertType;
 
     /** 告警级别，取值参见 AlertLevelEnum（INFO-提示 / WARNING-警告 / CRITICAL-严重） */
     @TableField("alert_level")
     @Schema(description = "告警级别（INFO/WARNING/CRITICAL）")
-    private String alertLevel;
+    private AlertLevelEnum alertLevel;
 
     /** 告警来源模块或组件名称 */
     @TableField("source")
@@ -60,7 +63,7 @@ public class Alert implements Serializable {
     /** 处理状态，取值参见 AlertStatusEnum（UNRESOLVED-未处理 / PROCESSING-处理中 / RESOLVED-已解决） */
     @TableField("status")
     @Schema(description = "处理状态（UNRESOLVED/PROCESSING/RESOLVED）")
-    private String status;
+    private AlertStatusEnum status;
 
     /** 告警处理人用户名 */
     @TableField("handler")
