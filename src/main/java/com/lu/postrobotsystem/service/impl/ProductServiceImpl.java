@@ -37,31 +37,6 @@ import static com.lu.postrobotsystem.exception.ResultCode.*;
 
 /**
  * 商品服务实现类
- * <p>
- * 实现商品管理的核心业务逻辑，包括商品增删改查、上下架管理以及智能推荐引擎。
- * 商品模块与库存模块紧密关联：推荐引擎需调用 InventoryMapper 查询库存状态，
- * 筛选出可售商品（有库存、样品正常、账实一致）。
- * </p>
- *
- * <p>
- * <b>推荐引擎算法概要：</b><br>
- * <pre>
- * 输入：用户意向标签、预算范围、筛选条件
- * 流程：
- *   1. 查询所有上架商品（status=1, is_deleted=0）
- *   2. 关联库存表，过滤不可售商品
- *   3. 为每个商品计算综合得分：
- *      - 标签匹配（权重 60%）：用户标签与商品标签的交集
- *      - 预算匹配（权重 30%）：价格在预算范围内
- *      - 机器人抓取（权重 10%）：支持则加分
- *   4. 按得分降序取 topN
- *   5. 组装推荐理由
- * 输出：推荐商品列表（含匹配分和推荐理由）
- * </pre>
- * </p>
- *
- * @see ProductService
- * @see ProductMapper
  */
 @Slf4j
 @Service
@@ -146,7 +121,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Void updateProduct(ProductUpdateRequest request) {
+    public void updateProduct(ProductUpdateRequest request) {
         // === 参数校验 ===
         ThrowUtils.throwIf(ObjectUtil.isNull(request), PARAM_ERROR, "商品信息不能为空");
         ThrowUtils.throwIf(ObjectUtil.isNull(request.getId()), PARAM_ERROR, "商品ID不能为空");
@@ -184,7 +159,6 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         // === 保存更新 ===
         updateById(product);
         log.info("编辑商品成功: id={}", product.getId());
-        return null;
     }
 
     /**
@@ -201,7 +175,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Void changeProductStatus(Long id, Integer status) {
+    public void changeProductStatus(Long id, Integer status) {
         // === 参数校验 ===
         ThrowUtils.throwIf(ObjectUtil.isNull(id), PARAM_ERROR, "商品ID不能为空");
         ThrowUtils.throwIf(ObjectUtil.isNull(status), PARAM_ERROR, "状态不能为空");
@@ -217,7 +191,6 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         product.setStatus(ProductStatusEnum.getEnumByCode(status));
         updateById(product);
         log.info("商品状态变更: id={}, status={}", id, status);
-        return null;
     }
 
     // ==================== 标签维护 ====================
@@ -298,13 +271,13 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
      * </p>
      * <p>调用链路：Controller → this.recommend → 查商品 → 查库存 → 评分 → 排序 → 组装推荐理由</p>
      *
-     * @param request 推荐请求
+     * @param productRecommendRequest 推荐请求
      * @return 推荐商品列表（含匹配分和推荐理由）
      */
     @Override
-    public List<ProductRecommendItem> recommend(ProductRecommendRequest request) {
+    public List<ProductRecommendItem> recommend(ProductRecommendRequest productRecommendRequest) {
         // 默认推荐数量为 10
-        int limit = ObjectUtil.defaultIfNull(request.getLimit(), 10);
+        int limit = ObjectUtil.defaultIfNull(productRecommendRequest.getLimit(), 10);
         ThrowUtils.throwIf(limit <= 0, PARAM_ERROR, "推荐数量必须大于0");
 
         // ========== 步骤 1：查询所有上架商品 ==========
@@ -361,7 +334,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
 
         // ========== 步骤 4：评分计算 ==========
         // 处理用户意向标签：去空白、去空
-        List<String> rawTags = request.getIntentTags();
+        List<String> rawTags = productRecommendRequest.getIntentTags();
         List<String> intentTags = (rawTags != null ? rawTags : Collections.<String>emptyList())
                 .stream().filter(StrUtil::isNotBlank)
                 .map(String::trim)
@@ -389,10 +362,10 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
 
             // 4b. 预算匹配（权重 30%）
             boolean budgetOk = true;
-            if (ObjectUtil.isNotNull(request.getBudgetMin()) && p.getPrice().compareTo(request.getBudgetMin()) < 0) {
+            if (ObjectUtil.isNotNull(productRecommendRequest.getBudgetMin()) && p.getPrice().compareTo(productRecommendRequest.getBudgetMin()) < 0) {
                 budgetOk = false;  // 价格低于最低预算
             }
-            if (ObjectUtil.isNotNull(request.getBudgetMax()) && p.getPrice().compareTo(request.getBudgetMax()) > 0) {
+            if (ObjectUtil.isNotNull(productRecommendRequest.getBudgetMax()) && p.getPrice().compareTo(productRecommendRequest.getBudgetMax()) > 0) {
                 budgetOk = false;  // 价格超过最高预算
             }
             if (budgetOk) {
@@ -411,7 +384,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
 
             // 4e. 仅抓取要求过滤
             // 若用户要求仅展示可机器人抓取的商品，排除不支持的商品
-            if (Boolean.TRUE.equals(request.getOnlyGraspable()) && !Boolean.TRUE.equals(p.getRobotGraspable())) {
+            if (Boolean.TRUE.equals(productRecommendRequest.getOnlyGraspable()) && !Boolean.TRUE.equals(p.getRobotGraspable())) {
                 continue;
             }
 

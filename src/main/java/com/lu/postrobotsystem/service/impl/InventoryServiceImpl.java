@@ -429,17 +429,17 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
      * </p>
      *
      * @param productId 商品ID
-     * @param request   视觉巡检结果
+     * @param visionInspectRequest   视觉巡检结果
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void visionInspect(Long productId, VisionInspectRequest request) {
+    public void visionInspect(Long productId, VisionInspectRequest visionInspectRequest) {
         // === 参数校验 ===
         ThrowUtils.throwIf(ObjectUtil.isNull(productId), PARAM_ERROR, "商品ID不能为空");
-        ThrowUtils.throwIf(ObjectUtil.isNull(request), PARAM_ERROR, "巡检结果不能为空");
+        ThrowUtils.throwIf(ObjectUtil.isNull(visionInspectRequest), PARAM_ERROR, "巡检结果不能为空");
 
         // 校验样品状态值合法性
-        SampleStatusEnum sampleStatus = SampleStatusEnum.getEnumByValue(request.getSampleStatus());
+        SampleStatusEnum sampleStatus = SampleStatusEnum.getEnumByValue(visionInspectRequest.getSampleStatus());
         ThrowUtils.throwIf(ObjectUtil.isNull(sampleStatus), PARAM_VALUE_INVALID, "样品状态值不合法");
 
         // === 查询库存记录 ===
@@ -454,15 +454,15 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         SampleStatusEnum prevSampleStatus = inventory.getSampleStatus();
 
         inventory.setSampleStatus(sampleStatus);
-        if (request.getMismatchFlag() != null) {
-            inventory.setMismatchFlag(request.getMismatchFlag());
+        if (visionInspectRequest.getMismatchFlag() != null) {
+            inventory.setMismatchFlag(visionInspectRequest.getMismatchFlag());
         }
         inventory.setVisionInspectTime(java.time.LocalDateTime.now());
         updateById(inventory);
 
         // === 巡检异常时创建告警 ===
         boolean hasIssue = sampleStatus != SampleStatusEnum.NORMAL
-                || Boolean.TRUE.equals(request.getMismatchFlag());
+                || Boolean.TRUE.equals(visionInspectRequest.getMismatchFlag());
 
         if (hasIssue) {
             Product product = productService.getById(productId);
@@ -474,7 +474,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
             } else if (sampleStatus == SampleStatusEnum.DISPLACED) {
                 msg.append("商品\"").append(productName).append("\"陈列错位");
             }
-            if (Boolean.TRUE.equals(request.getMismatchFlag())) {
+            if (Boolean.TRUE.equals(visionInspectRequest.getMismatchFlag())) {
                 if (sampleStatus != SampleStatusEnum.NORMAL) msg.append("，");
                 msg.append("库存账实不一致");
             }
@@ -501,7 +501,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         }
 
         log.info("视觉巡检结果回写成功: productId={}, sampleStatus={}, mismatchFlag={}",
-                productId, sampleStatus, request.getMismatchFlag());
+                productId, sampleStatus, visionInspectRequest.getMismatchFlag());
     }
 
     // ==================== 手动调整与删除 ====================

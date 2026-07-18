@@ -54,7 +54,7 @@ public interface ProductService extends IService<Product> {
      * @param request 商品更新请求，包含待修改的字段
      * @return void
      */
-    Void updateProduct(ProductUpdateRequest request);
+    void updateProduct(ProductUpdateRequest request);
 
     /**
      * 上架/下架商品
@@ -67,7 +67,7 @@ public interface ProductService extends IService<Product> {
      * @param status 目标状态：0-下架，1-上架
      * @return void
      */
-    Void changeProductStatus(Long id, Integer status);
+    void changeProductStatus(Long id, Integer status);
 
     /**
      * 更新商品标签。
