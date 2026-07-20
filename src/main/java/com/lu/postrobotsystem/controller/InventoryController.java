@@ -18,7 +18,9 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+
 
 import static com.lu.postrobotsystem.exception.ResultCode.PARAM_ERROR;
 
@@ -241,6 +243,21 @@ public class InventoryController {
     public Result<Void> adjustStock(@Valid @RequestBody InventoryAdjustRequest request) {
         inventoryService.adjustStock(request);
         return Result.success(null, "调整成功");
+    }
+
+    /**
+     * 创建库存记录。
+     * <p>
+     * 为指定商品创建初始库存记录（realStock=0, lockedStock=0），
+     * 用于商品首次上架前初始化库存信息。
+     * </p>
+     */
+    @PostMapping("/create")
+    @Operation(summary = "创建库存记录")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    public Result<Void> createInventory(@RequestParam @NotNull Long productId) {
+        inventoryService.createInventory(productId);
+        return Result.success(null, "库存记录创建成功");
     }
 
     /**

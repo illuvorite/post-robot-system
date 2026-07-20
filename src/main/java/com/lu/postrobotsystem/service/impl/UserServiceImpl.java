@@ -72,12 +72,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         // === 查询用户 ===
         // SQL: SELECT id, username, password, role, status, ... FROM user WHERE (username=? OR email=? OR phone=?) AND is_deleted=0 LIMIT 1
         User user = baseMapper.selectOne(wrapper);
-        ThrowUtils.throwIf(ObjectUtil.isNull(user), PARAM_ERROR, "账号/邮箱/手机号不存在");
+        ThrowUtils.throwIf(ObjectUtil.isNull(user), PARAM_ERROR, "用户名或密码错误");
         ThrowUtils.throwIf(ObjectUtil.equal(user.getStatus(), 0), PARAM_ERROR, "账号已停用");
 
         // === BCrypt 校验密码 ===
         boolean passwordMatch = BCrypt.checkpw(userPassword, user.getPassword());
-        ThrowUtils.throwIf(!passwordMatch, PARAM_ERROR, "密码错误");
+        ThrowUtils.throwIf(!passwordMatch, PARAM_ERROR, "用户名或密码错误");
 
         // === 生成双令牌并返回 ===
         return buildLoginResponse(user, getClientIp(request));

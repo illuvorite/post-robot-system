@@ -182,13 +182,13 @@ public final class ThrowUtils {
     }
 
     /**
-     * 抛出未授权异常（40102 参数类型错误）
+     * 抛出未授权异常（40100 未登录）
      * <p>用于用户未登录或登录已过期等场景。</p>
      *
      * @param message 错误描述信息
      */
     public static void unauthorized(String message) {
-        throw new BusinessException(ResultCode.PARAM_TYPE_ERROR, message);
+        throw new BusinessException(ResultCode.NOT_LOGIN_ERROR, message);
     }
 
     /**

@@ -80,10 +80,10 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
     private final InventoryMapper inventoryMapper;
     private final AlertMapper alertMapper;
 
-    // Lua 脚本的 SHA 缓存（volatile 保证多线程可见性），避免每次调用重复加载脚本
-    private volatile String lockScriptSha;
-    private volatile String releaseScriptSha;
-    private volatile String deductScriptSha;
+    // Lua 脚本内容缓存，加载后直接使用完整脚本（Redisson 内部自动处理 EVALSHA 缓存与回退）
+    private volatile String lockScript;
+    private volatile String releaseScript;
+    private volatile String deductScript;
 
     // ==================== 查询方法 ====================
 
@@ -252,6 +252,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
      * @return true=锁定成功, false=库存不足
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean lockStock(Long productId, Integer quantity) {
         // === 参数校验 ===
         ThrowUtils.throwIf(ObjectUtil.isNull(productId), PARAM_ERROR, "商品ID不能为空");
@@ -323,6 +324,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
      * @return true=释放成功, false=释放失败
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean releaseStock(Long productId, Integer quantity) {
         // === 参数校验 ===
         ThrowUtils.throwIf(ObjectUtil.isNull(productId), PARAM_ERROR, "商品ID不能为空");
@@ -390,6 +392,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
      * @return true=扣减成功, false=扣减失败
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean deductStock(Long productId, Integer quantity) {
         // === 参数校验 ===
         ThrowUtils.throwIf(ObjectUtil.isNull(productId), PARAM_ERROR, "商品ID不能为空");
@@ -629,6 +632,41 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         log.info("库存记录已删除: productId={}", productId);
     }
 
+    /**
+     * 创建库存记录。
+     * <p>
+     * 为指定商品创建初始库存记录（realStock=0, lockedStock=0），
+     * 同步初始化 Redis 缓存。
+     * </p>
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void createInventory(Long productId) {
+        ThrowUtils.throwIf(ObjectUtil.isNull(productId), PARAM_ERROR, "商品ID不能为空");
+
+        // 检查是否已存在库存记录
+        Inventory existing = inventoryMapper.selectOne(
+                new LambdaQueryWrapper<Inventory>()
+                        .eq(Inventory::getProductId, productId)
+                        .eq(Inventory::getIsDeleted, 0));
+        ThrowUtils.throwIf(existing != null, DATA_ALREADY_EXIST, "该商品已有库存记录");
+
+        // 创建初始库存记录
+        Inventory inventory = new Inventory()
+                .setProductId(productId)
+                .setRealStock(0)
+                .setLockedStock(0)
+                .setLowStockThreshold(10)
+                .setSampleStatus(SampleStatusEnum.NORMAL)
+                .setMismatchFlag(false);
+        save(inventory);
+
+        // 同步初始化 Redis 缓存
+        String availableKey = RedisKeyConstants.STOCK_AVAILABLE + productId;
+        stringRedisTemplate.opsForValue().set(availableKey, "0");
+        log.info("库存记录已创建: productId={}", productId);
+    }
+
     // ==================== 低库存告警 ====================
 
     /**
@@ -806,57 +844,52 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
     }
 
     /**
-     * 加载（或从缓存获取）库存锁定的 Lua 脚本 SHA
-     * <p>通过 scriptLoad 将脚本注册到 Redis，后续执行时只需传 SHA 而非完整脚本，减少网络开销。</p>
+     * 加载（或从缓存获取）库存锁定的 Lua 脚本内容
+     * <p>读取 .lua 文件并缓存内容。传给 Redisson eval() 时传入完整脚本，
+     * Redisson 内部会自动使用 EVALSHA 并处理 NOSCRIPT 回退。</p>
      *
-     * @return Lua 脚本的 SHA 标识
+     * @return Lua 脚本完整内容
      */
     private String loadLockScript() {
-        if (lockScriptSha != null) return lockScriptSha;
-        lockScriptSha = loadScript("lua/stock_lock.lua");
-        return lockScriptSha;
+        if (lockScript != null) return lockScript;
+        lockScript = readScript("lua/stock_lock.lua");
+        return lockScript;
     }
 
     /**
-     * 加载（或从缓存获取）库存释放的 Lua 脚本 SHA
+     * 加载（或从缓存获取）库存释放的 Lua 脚本内容
      *
-     * @return Lua 脚本的 SHA 标识
+     * @return Lua 脚本完整内容
      */
     private String loadReleaseScript() {
-        if (releaseScriptSha != null) return releaseScriptSha;
-        releaseScriptSha = loadScript("lua/stock_release.lua");
-        return releaseScriptSha;
+        if (releaseScript != null) return releaseScript;
+        releaseScript = readScript("lua/stock_release.lua");
+        return releaseScript;
     }
 
     /**
-     * 加载（或从缓存获取）库存扣减的 Lua 脚本 SHA
+     * 加载（或从缓存获取）库存扣减的 Lua 脚本内容
      *
-     * @return Lua 脚本的 SHA 标识
+     * @return Lua 脚本完整内容
      */
     private String loadDeductScript() {
-        if (deductScriptSha != null) return deductScriptSha;
-        deductScriptSha = loadScript("lua/stock_deduct.lua");
-        return deductScriptSha;
+        if (deductScript != null) return deductScript;
+        deductScript = readScript("lua/stock_deduct.lua");
+        return deductScript;
     }
 
     /**
-     * 加载指定路径的 Lua 脚本到 Redis，返回 SHA 标识
-     * <p>从 classpath 读取 .lua 文件内容，调用 Redisson 的 scriptLoad 注册到 Redis。</p>
+     * 从 classpath 读取 Lua 脚本文件内容
      *
-     * @param classpath Lua 脚本的 classpath 路径（如 "lua/stock_lock.lua"）
-     * @return 脚本的 SHA 标识
-     * @throws RuntimeException 脚本加载失败时抛出
+     * @param classpath Lua 脚本的 classpath 路径
+     * @return 脚本完整内容字符串
      */
-    private String loadScript(String classpath) {
-        try {
-            // 从 classpath 读取 Lua 脚本内容
-            ClassPathResource resource = new ClassPathResource(classpath);
-            String script = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            // 注册到 Redis 并返回 SHA
-            return redissonClient.getScript(StringCodec.INSTANCE).scriptLoad(script);
+    private String readScript(String classpath) {
+        try (var is = new ClassPathResource(classpath).getInputStream()) {
+            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
         } catch (Exception e) {
-            log.error("加载 Lua 脚本失败: {}", classpath, e);
-            throw new RuntimeException("Lua 脚本加载失败: " + classpath, e);
+            log.error("读取 Lua 脚本失败: {}", classpath, e);
+            throw new RuntimeException("读取 Lua 脚本失败: " + classpath, e);
         }
     }
 }

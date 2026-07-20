@@ -29,13 +29,8 @@ public class TransactionIdGenerator {
      * @see SignUtil#sign 该ID被签名计算所使用
      */
     public static String generate() {
-        // 原子自增获取下一个序列号
-        long seq = SEQ.incrementAndGet();
-        // 当序列号超过 9999999999 时重置为 0
-        if (seq > 9999999999L) {
-            SEQ.set(0);
-            seq = 0;
-        }
+        // 原子自增获取下一个序列号（达到上限自动归零，无竞态条件）
+        long seq = SEQ.updateAndGet(v -> v >= 9999999999L ? 0 : v + 1);
         // 拼接 平台编码 + 时间戳 + 10位补零流水号
         return PLATFORM_CODE
              + LocalDateTime.now().format(FORMATTER)

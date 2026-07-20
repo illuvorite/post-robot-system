@@ -2,6 +2,7 @@ package com.lu.postrobotsystem.controller;
 
 import cn.hutool.core.util.StrUtil;
 import com.lu.postrobotsystem.common.Result;
+import com.lu.postrobotsystem.common.annotation.AuditLog;
 import com.lu.postrobotsystem.exception.ThrowUtils;
 import com.lu.postrobotsystem.model.request.user.UserLoginRequest;
 import com.lu.postrobotsystem.model.request.user.UserRegisterRequest;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 
 import static com.lu.postrobotsystem.exception.ResultCode.PARAM_ERROR;
 import static com.lu.postrobotsystem.exception.ResultCode.NOT_LOGIN_ERROR;
+import static com.lu.postrobotsystem.model.enums.OperationTypeEnum.LOGIN;
 
 /**
  * 认证控制器。
@@ -48,6 +50,7 @@ public class AuthController {
      */
     @PostMapping("/login")
     @Operation(summary = "用户登录（支持账号/邮箱/手机号）")
+    @AuditLog(operationType = LOGIN, targetType = "USER", targetIdExpression = "#request.username", detail = "用户登录")
     public Result<UserLoginResponse> login(@Valid @RequestBody UserLoginRequest request,
                                            HttpServletRequest httpRequest) {
         // 调用 userService 执行登录逻辑，传入多种可登录标识和密码及请求上下文

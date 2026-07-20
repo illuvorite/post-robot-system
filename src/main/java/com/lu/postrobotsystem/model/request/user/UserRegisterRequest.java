@@ -1,6 +1,7 @@
 package com.lu.postrobotsystem.model.request.user;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 import java.io.Serial;
@@ -47,12 +48,14 @@ public class UserRegisterRequest implements Serializable {
     /**
      * 用户密码，必填。需满足密码复杂度要求。
      */
+    @NotBlank(message = "密码不能为空")
     @Schema(description = "用户密码", requiredMode = Schema.RequiredMode.REQUIRED)
     private String password;
 
     /**
      * 确认密码，必填。必须与 password 字段值一致。
      */
+    @NotBlank(message = "确认密码不能为空")
     @Schema(description = "确认密码", requiredMode = Schema.RequiredMode.REQUIRED)
     private String checkPassword;
 

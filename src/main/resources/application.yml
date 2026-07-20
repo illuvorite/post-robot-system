@@ -27,7 +27,9 @@ spring:
     time-zone: Asia/Shanghai
 
   flyway:
-    enabled: false
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 3
 
 mybatis-plus:
   global-config:
@@ -69,7 +71,7 @@ knife4j:
 
 # ==================== JWT 配置 ====================
 jwt:
-  secret: post-robot-jwt-secret-key-2026
+  secret: post-robot-jwt-secret-key-2026-post-robot-32bytes
   access-expiration: 1800    # accessToken 过期时间，30分钟，单位秒
   refresh-expiration: 604800 # refreshToken 过期时间，7天，单位秒
 

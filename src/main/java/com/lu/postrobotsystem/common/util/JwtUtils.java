@@ -4,7 +4,7 @@ import cn.hutool.core.date.DateUtil;
 import com.lu.postrobotsystem.model.enums.UserRoleEnum;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.security.Keys;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -12,42 +12,20 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.stereotype.Component;
 
+import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.List;
 
 /**
  * JWT（JSON Web Token）工具类
- * <p>
- * 负责 JWT 令牌的生成、验证和解析，以及 Spring Security 认证信息的构建。
- * 令牌分为 accessToken（访问令牌）和 refreshToken（刷新令牌）两种类型，
- * 分别用于接口鉴权和令牌续期。
- * </p>
- *
- * <p><b>配置属性（来自 application.yml 的 jwt 前缀）：</b>
- * <ul>
- *   <li>{@link #secret} -- JWT 签名密钥，用于 HS512 算法加签</li>
- *   <li>{@link #accessExpiration} -- 访问令牌过期时间（秒）</li>
- *   <li>{@link #refreshExpiration} -- 刷新令牌过期时间（秒）</li>
- * </ul>
- * </p>
- *
- * <p><b>调用关系：</b>
- * <ul>
- *   <li>{@link #generateAccessToken} / {@link #generateRefreshToken} -- 由 {@code AuthController} 在登录/刷新时调用</li>
- *   <li>{@link #validateToken} / {@link #getAuthentication} -- 由 {@link com.lu.postrobotsystem.config.JwtAuthenticationFilter} 在请求过滤时调用</li>
- *   <li>{@link #getUserId} / {@link #getUsername} / {@link #getRole} -- 由业务 Service 层从 token 中提取用户信息</li>
- * </ul>
- * </p>
- *
- * @author lu
- * @since 1.0.0
  */
 @Data
 @Component
 @ConfigurationProperties(prefix = "jwt")
 public class JwtUtils {
 
-    /** JWT 签名密钥，用于令牌的签发和验证（HS512 算法） */
+    /** JWT 签名密钥，用于令牌的签发和验证（HMAC 算法） */
     private String secret;
 
     /** 访问令牌（accessToken）的过期时间，单位：秒 */
@@ -57,10 +35,26 @@ public class JwtUtils {
     private long refreshExpiration;
 
     /**
+     * 获取 HMAC 签名密钥（由配置中的 secret 派生）
+     * <p>使用 Keys.hmacShaKeyFor 自动根据密钥长度选择 HMAC-SHA 算法。
+     * 若密钥字节不足 256 位，自动补齐至 256 位以满足 jjwt 0.12.x 的安全要求。</p>
+     */
+    private SecretKey getSigningKey() {
+        byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
+        // jjwt 0.12.x 要求 HMAC 密钥 ≥ 256 位，不足时补齐
+        if (keyBytes.length < 32) {
+            byte[] padded = new byte[32];
+            System.arraycopy(keyBytes, 0, padded, 0, keyBytes.length);
+            return Keys.hmacShaKeyFor(padded);
+        }
+        return Keys.hmacShaKeyFor(keyBytes);
+    }
+
+    /**
      * 生成访问令牌（accessToken）
      * <p>
      * 令牌载荷包含：用户ID（subject）、用户名、角色、令牌类型（access）。
-     * 使用 HS512 算法加签，过期时间由 {@link #accessExpiration} 控制。
+     * 使用 jjwt 0.12.x 安全 API 加签，过期时间由 {@link #accessExpiration} 控制。
      * </p>
      *
      * @param userId   用户ID，作为令牌主体（subject）
@@ -72,13 +66,13 @@ public class JwtUtils {
         // 计算过期时间：当前时间 + accessExpiration 秒
         Date expiryDate = DateUtil.offsetSecond(new Date(), (int) accessExpiration);
         return Jwts.builder()
-                .setSubject(String.valueOf(userId))                  // 设置主题为用户ID
+                .subject(String.valueOf(userId))                  // 设置主题为用户ID
                 .claim("username", username)                        // 自定义声明：用户名
                 .claim("role", role.name())                         // 自定义声明：角色
                 .claim("tokenType", "access")                       // 自定义声明：令牌类型
-                .setIssuedAt(new Date())                            // 设置签发时间
-                .setExpiration(expiryDate)                          // 设置过期时间
-                .signWith(SignatureAlgorithm.HS512, secret)         // 使用 HS512 算法签名
+                .issuedAt(new Date())                              // 设置签发时间
+                .expiration(expiryDate)                            // 设置过期时间
+                .signWith(getSigningKey())                         // 使用 HMAC 算法签名（jjwt 0.12.x 新 API）
                 .compact();                                         // 压缩为字符串
     }
 
@@ -97,11 +91,11 @@ public class JwtUtils {
         // 计算过期时间：当前时间 + refreshExpiration 秒
         Date expiryDate = DateUtil.offsetSecond(new Date(), (int) refreshExpiration);
         return Jwts.builder()
-                .setSubject(String.valueOf(userId))                  // 设置主题为用户ID
+                .subject(String.valueOf(userId))                  // 设置主题为用户ID
                 .claim("tokenType", "refresh")                      // 自定义声明：令牌类型
-                .setIssuedAt(new Date())                            // 设置签发时间
-                .setExpiration(expiryDate)                          // 设置过期时间
-                .signWith(SignatureAlgorithm.HS512, secret)         // 使用 HS512 算法签名
+                .issuedAt(new Date())                              // 设置签发时间
+                .expiration(expiryDate)                            // 设置过期时间
+                .signWith(getSigningKey())                         // 使用 HMAC 算法签名（jjwt 0.12.x 新 API）
                 .compact();                                         // 压缩为字符串
     }
 
@@ -110,6 +104,7 @@ public class JwtUtils {
      * <p>
      * 通过解析签名来验证令牌的完整性和真实性。
      * 包括：签名是否匹配、令牌是否过期、令牌格式是否正确。
+     * 使用 jjwt 0.12.x 的 verifyWith API。
      * </p>
      *
      * @param token JWT 令牌字符串
@@ -117,8 +112,11 @@ public class JwtUtils {
      */
     public boolean validateToken(String token) {
         try {
-            // 使用签名密钥解析令牌，若抛出异常则说明验证失败
-            Jwts.parser().setSigningKey(secret).parseClaimsJws(token);
+            // 使用签名密钥验证令牌（0.12.x API）
+            Jwts.parser()
+                    .verifyWith(getSigningKey())
+                    .build()
+                    .parseSignedClaims(token);
             return true;
         } catch (Exception e) {
             // 令牌过期、签名不匹配、格式错误等均视为无效
@@ -137,7 +135,11 @@ public class JwtUtils {
      * @return Claims 对象，包含令牌载荷中的所有声明信息
      */
     public Claims getClaims(String token) {
-        return Jwts.parser().setSigningKey(secret).parseClaimsJws(token).getBody();
+        return Jwts.parser()
+                .verifyWith(getSigningKey())
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
     }
 
 
@@ -145,7 +147,7 @@ public class JwtUtils {
      * 从令牌中构建 Spring Security 认证对象
      */
     public Authentication getAuthentication(String token) {
-        // 解析令牌获取全部声明
+        // 解析令牌获取全部声明（0.12.x API: parseSignedClaims + getPayload）
         Claims claims = getClaims(token);
         // 提取用户ID
         Long userId = Long.parseLong(claims.getSubject());

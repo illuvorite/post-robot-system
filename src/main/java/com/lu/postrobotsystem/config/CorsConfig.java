@@ -52,9 +52,9 @@ public class CorsConfig implements WebMvcConfigurer {
                 .allowedOriginPatterns("http://localhost:*")
                 // 允许的 HTTP 方法（符合 RESTful 规范）
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
-                // 允许所有请求头
-                .allowedHeaders("*")
-                // 暴露所有响应头给前端
-                .exposedHeaders("*");
+                // 允许所有请求头（当 allowCredentials=true 时通配符会有浏览器兼容问题）
+                .allowedHeaders("Authorization", "Content-Type", "token", "X-Requested-With", "Accept", "Origin")
+                // 显式暴露必要响应头（通配符在 credentials 模式下浏览器不支持）
+                .exposedHeaders("Authorization", "Content-Type", "Content-Disposition");
     }
 }
