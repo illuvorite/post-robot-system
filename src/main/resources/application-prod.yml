@@ -1,0 +1,25 @@
+# 生产环境配置
+# 激活方式：--spring.profiles.active=prod 或 SPRING_PROFILES_ACTIVE=prod
+
+logging:
+  level:
+    com.lu.postrobotsystem: info
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.nologging.NoLogImpl
+
+knife4j:
+  production: true
+
+postal:
+  mock:
+    enabled: false
+
+payment:
+  polling:
+    enabled: true
+
+order:
+  timeout:
+    enabled: true

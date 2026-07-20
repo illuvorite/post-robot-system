@@ -1,0 +1,18 @@
+# 开发环境配置
+# 激活方式：--spring.profiles.active=dev 或 SPRING_PROFILES_ACTIVE=dev
+
+logging:
+  level:
+    com.lu.postrobotsystem: debug
+    org.springframework.jdbc: debug
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+knife4j:
+  production: false
+
+postal:
+  mock:
+    enabled: true

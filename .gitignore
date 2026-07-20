@@ -1,5 +1,10 @@
 HELP.md
 target/
+taskpro/
+docs/
+post-robot-vue/node_modules/
+post-robot-vue/dist/
+post-robot-vue/.vite/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
