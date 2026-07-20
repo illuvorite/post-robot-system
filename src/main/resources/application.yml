@@ -16,12 +16,6 @@ spring:
     password: admin
     driver-class-name: com.mysql.cj.jdbc.Driver
 
-  # flyway:
-  #   enabled: true
-  #   locations: classpath:db/migration
-  #   baseline-on-migrate: true
-  #   baseline-version: 0
-
   data:
     redis:
       host: localhost
@@ -95,3 +89,15 @@ postal:
     desk-code: ROBOT01
     src-sys-id: POSTR
     dst-sys-id: XYDYYQDXT
+
+# 支付轮询配置
+payment:
+  polling:
+    enabled: true            # 是否启用支付状态轮询
+    interval-ms: 30000        # 轮询间隔（毫秒）
+
+# 订单超时配置
+order:
+  timeout:
+    enabled: true             # 是否启用订单超时处理任务
+    minutes: 30               # 订单超时时间（分钟）

@@ -71,6 +71,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         ThrowUtils.throwIf(StrUtil.isBlank(request.getName()), PARAM_ERROR, "商品名称不能为空");
 
         // === 检查商品名称是否重复（去除首尾空格后匹配） ===
+        // SQL: SELECT COUNT(*) FROM product WHERE name=? AND is_deleted=0
         boolean exists = baseMapper.selectCount(
                 new LambdaQueryWrapper<Product>()
                         .eq(Product::getName, request.getName().trim())
@@ -91,9 +92,11 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
                 .setStatus(ProductStatusEnum.OFF_SHELF); // 0=下架（新建商品默认下架，需手动上架）
 
         // === 保存到数据库 ===
+        // SQL: INSERT INTO product (id, name, description, tags, price, original_price, image_url, robot_graspable, display_point, status, create_time, update_time, is_deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         save(product);
 
         // === 自动创建库存记录（初始为 0，后续通过入库操作增加） ===
+        // SQL: INSERT INTO inventory (id, product_id, real_stock, locked_stock, low_stock_threshold, sample_status, mismatch_flag, create_time, update_time, is_deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         Inventory inventory = new Inventory()
                 .setProductId(product.getId())
                 .setRealStock(0)
@@ -127,12 +130,14 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         ThrowUtils.throwIf(ObjectUtil.isNull(request.getId()), PARAM_ERROR, "商品ID不能为空");
 
         // === 查询现有商品 ===
+        // SQL: SELECT id, name, description, tags, price, ... FROM product WHERE id=? AND is_deleted=0
         Product product = getById(request.getId());
         ThrowUtils.throwIf(ObjectUtil.isNull(product), NOT_FOUND, "商品不存在");
 
         // === 处理名称更新（含重复检查） ===
         if (StrUtil.isNotBlank(request.getName()) && !request.getName().trim().equals(product.getName())) {
             // 检查新名称是否被其他商品占用（排除当前商品自身）
+            // SQL: SELECT COUNT(*) FROM product WHERE name=? AND id<>? AND is_deleted=0
             boolean exists = baseMapper.selectCount(
                     new LambdaQueryWrapper<Product>()
                             .eq(Product::getName, request.getName().trim())
@@ -157,6 +162,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         }
 
         // === 保存更新 ===
+        // SQL: UPDATE product SET name=?, description=?, tags=?, price=?, original_price=?, image_url=?, robot_graspable=?, display_point=?, status=?, update_time=NOW() WHERE id=? AND is_deleted=0
         updateById(product);
         log.info("编辑商品成功: id={}", product.getId());
     }
@@ -181,6 +187,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         ThrowUtils.throwIf(ObjectUtil.isNull(status), PARAM_ERROR, "状态不能为空");
 
         // === 查询商品是否存在 ===
+        // SQL: SELECT id, name, status, ... FROM product WHERE id=? AND is_deleted=0
         Product product = getById(id);
         ThrowUtils.throwIf(ObjectUtil.isNull(product), NOT_FOUND, "商品不存在");
 
@@ -188,6 +195,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         ThrowUtils.throwIf(status != 0 && status != 1, PARAM_VALUE_INVALID, "状态值不合法（0-下架 1-上架）");
 
         // === 更新状态 ===
+        // SQL: UPDATE product SET status=?, update_time=NOW() WHERE id=? AND is_deleted=0
         product.setStatus(ProductStatusEnum.getEnumByCode(status));
         updateById(product);
         log.info("商品状态变更: id={}, status={}", id, status);
@@ -211,9 +219,11 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         ThrowUtils.throwIf(ObjectUtil.isNull(id), PARAM_ERROR, "商品ID不能为空");
         ThrowUtils.throwIf(StrUtil.isBlank(tags), PARAM_ERROR, "标签不能为空");
 
+        // SQL: SELECT id, name, tags, ... FROM product WHERE id=? AND is_deleted=0
         Product product = getById(id);
         ThrowUtils.throwIf(ObjectUtil.isNull(product), NOT_FOUND, "商品不存在");
 
+        // SQL: UPDATE product SET tags=?, update_time=NOW() WHERE id=? AND is_deleted=0
         product.setTags(tags.trim());
         updateById(product);
         log.info("商品标签更新成功: id={}, tags={}", id, tags);
@@ -281,6 +291,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         ThrowUtils.throwIf(limit <= 0, PARAM_ERROR, "推荐数量必须大于0");
 
         // ========== 步骤 1：查询所有上架商品 ==========
+        // SQL: SELECT id, name, tags, price, robot_graspable, ... FROM product WHERE status=1 AND is_deleted=0
         List<Product> allProducts = baseMapper.selectList(
                 new LambdaQueryWrapper<Product>()
                         .eq(Product::getStatus, ProductStatusEnum.ON_SHELF)      // 仅上架商品
@@ -294,6 +305,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         // 收集所有商品 ID
         Set<Long> productIds = allProducts.stream().map(Product::getId).collect(Collectors.toSet());
         // 批量查询库存记录
+        // SQL: SELECT id, product_id, real_stock, locked_stock, sample_status, mismatch_flag, ... FROM inventory WHERE product_id IN (?,?,...) AND is_deleted=0
         List<Inventory> inventories = inventoryMapper.selectList(
                 new LambdaQueryWrapper<Inventory>()
                         .in(Inventory::getProductId, productIds)
@@ -320,6 +332,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         }
 
         // ========== 步骤 3b：查询低库存告警列表，用于评分扣减 ==========
+        // SQL: SELECT id, source_id FROM alert WHERE alert_type='LOW_STOCK' AND status='UNRESOLVED' AND is_deleted=0
         Set<Long> lowStockAlertProductIds = alertMapper.selectList(
                         new LambdaQueryWrapper<Alert>()
                                 .eq(Alert::getAlertType, AlertTypeEnum.LOW_STOCK)

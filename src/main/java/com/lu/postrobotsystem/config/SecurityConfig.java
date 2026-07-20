@@ -50,6 +50,8 @@ public class SecurityConfig {
                     .requestMatchers("/auth/**").permitAll()
                     // 允许所有以 /health/ 开头的请求（健康检查）
                     .requestMatchers("/health/**").permitAll()
+                    // 允许支付回调（邮政系统异步通知，无需 JWT 认证）
+                    .requestMatchers("/payment/callback").permitAll()
                     // 允许所有 Swagger / Knife4j 相关请求（API 文档）
                     .requestMatchers(
                             "/v3/api-docs/**",

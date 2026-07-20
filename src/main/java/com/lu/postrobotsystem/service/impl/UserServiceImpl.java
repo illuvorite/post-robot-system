@@ -70,6 +70,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
 
         // === 查询用户 ===
+        // SQL: SELECT id, username, password, role, status, ... FROM user WHERE (username=? OR email=? OR phone=?) AND is_deleted=0 LIMIT 1
         User user = baseMapper.selectOne(wrapper);
         ThrowUtils.throwIf(ObjectUtil.isNull(user), PARAM_ERROR, "账号/邮箱/手机号不存在");
         ThrowUtils.throwIf(ObjectUtil.equal(user.getStatus(), 0), PARAM_ERROR, "账号已停用");
@@ -111,6 +112,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         ThrowUtils.throwIf(userPassword.length() < 6, PARAM_ERROR, "密码长度不能少于6位");
 
         // === 检查账号是否已被注册 ===
+        // SQL: SELECT COUNT(*) FROM user WHERE username=? AND is_deleted=0
         boolean exists = baseMapper.selectCount(
                 new LambdaQueryWrapper<User>()
                         .eq(User::getUsername, userAccount)
@@ -119,6 +121,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         ThrowUtils.throwIf(exists, PARAM_ERROR, "账号已存在");
 
         // === 创建用户（BCrypt 加密存储密码，默认角色为操作员） ===
+        // SQL: INSERT INTO user (id, username, password, real_name, phone, email, role, status, create_time, update_time, is_deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         User user = new User()
                 .setUsername(userAccount)
                 .setPassword(BCrypt.hashpw(userPassword))    // BCrypt 加密（不可逆）
@@ -152,6 +155,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
 
         // === 步骤 1：从 Redis 删除 accessToken 会话 ===
+        // Redis: DEL login:token:{token}
         stringRedisTemplate.delete(RedisKeyConstants.LOGIN_TOKEN_KEY + token);
 
         // === 步骤 2：将 token 加入黑名单，TTL 设为 token 的剩余有效期 ===
@@ -163,6 +167,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                 remainingTtl = Math.max(1, (exp - System.currentTimeMillis()) / 1000);
             }
             // 将 token 加入黑名单（"1" 为占位值，无实际含义）
+            // Redis: SET login:blacklist:{token} "1" EX {remainingTtl}
             stringRedisTemplate.opsForValue().set(
                     RedisKeyConstants.LOGIN_BLACKLIST_KEY + token, "1",
                     remainingTtl, TimeUnit.SECONDS);
@@ -201,17 +206,20 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         ThrowUtils.throwIf(!jwtUtils.validateToken(refreshToken), ResultCode.NOT_LOGIN_ERROR, "刷新令牌无效或已过期");
 
         // === 步骤 3：验证 Redis 中是否存在该 refreshToken 的映射 ===
+        // Redis: GET login:refresh:{refreshToken}
         String userIdStr = stringRedisTemplate.opsForValue().get(
                 RedisKeyConstants.LOGIN_REFRESH_KEY + refreshToken);
         ThrowUtils.throwIf(StrUtil.isBlank(userIdStr), ResultCode.NOT_LOGIN_ERROR, "刷新令牌已失效，请重新登录");
 
         // === 步骤 4：查询用户并校验状态 ===
         Long userId = Long.parseLong(userIdStr);
+        // SQL: SELECT id, username, role, status, ... FROM user WHERE id=? AND is_deleted=0
         User user = getById(userId);
         ThrowUtils.throwIf(ObjectUtil.isNull(user), PARAM_ERROR, "用户不存在");
         ThrowUtils.throwIf(ObjectUtil.equal(user.getStatus(), 0), PARAM_ERROR, "账号已停用");
 
         // === 步骤 5：删除旧的 refreshToken 映射（令牌轮换） ===
+        // Redis: DEL login:refresh:{refreshToken}
         stringRedisTemplate.delete(RedisKeyConstants.LOGIN_REFRESH_KEY + refreshToken);
 
         // === 步骤 6：生成全新的双令牌 ===
@@ -242,10 +250,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         ThrowUtils.throwIf(StrUtil.isBlank(token), ResultCode.NOT_LOGIN_ERROR, "未登录");
 
         // === 步骤 2：检查是否在黑名单中 ===
+        // Redis: EXISTS login:blacklist:{token}
         Boolean isBlacklisted = stringRedisTemplate.hasKey(RedisKeyConstants.LOGIN_BLACKLIST_KEY + token);
         ThrowUtils.throwIf(Boolean.TRUE.equals(isBlacklisted), ResultCode.NOT_LOGIN_ERROR, "Token 已被注销");
 
         // === 步骤 3：检查 Redis 会话（是否已过期或被踢下线） ===
+        // Redis: GET login:token:{token}
         String sessionJson = stringRedisTemplate.opsForValue().get(RedisKeyConstants.LOGIN_TOKEN_KEY + token);
         ThrowUtils.throwIf(StrUtil.isBlank(sessionJson), ResultCode.NOT_LOGIN_ERROR, "登录已过期，请重新登录");
 
@@ -254,6 +264,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         Long userId = Long.valueOf((String) sessionMap.get("userId"));
 
         // === 步骤 5：查询用户并校验状态 ===
+        // SQL: SELECT id, username, role, status, is_deleted, ... FROM user WHERE id=? AND is_deleted=0
         User user = getById(userId);
         ThrowUtils.throwIf(ObjectUtil.isNull(user), ResultCode.NOT_LOGIN_ERROR, "用户不存在");
         ThrowUtils.throwIf(ObjectUtil.equal(user.getIsDeleted(), 1), ResultCode.NOT_LOGIN_ERROR, "用户已注销");
@@ -317,6 +328,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
 
         // 查询目标用户实体
+        // SQL: SELECT id, username, password, role, ... FROM user WHERE id=? AND is_deleted=0
         User user = getById(targetId);
         ThrowUtils.throwIf(ObjectUtil.isNull(user), PARAM_ERROR, "用户不存在");
 
@@ -344,6 +356,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
 
         // 持久化更新到数据库
+        // SQL: UPDATE user SET real_name=?, phone=?, email=?, role=?, password=?, update_time=NOW() WHERE id=? AND is_deleted=0
         updateById(user);
     }
 
@@ -416,12 +429,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         sessionMap.put("loginTime", System.currentTimeMillis());
 
         // === 存储 accessToken 会话到 Redis（TTL = accessToken 有效期） ===
+        // Redis: SET login:token:{accessToken} {sessionJson} EX {accessExpiration}
         stringRedisTemplate.opsForValue().set(
                 RedisKeyConstants.LOGIN_TOKEN_KEY + accessToken,
                 JSONUtil.toJsonStr(sessionMap),
                 jwtUtils.getAccessExpiration(), TimeUnit.SECONDS);
 
         // === 存储 refreshToken → userId 映射到 Redis（TTL = refreshToken 有效期） ===
+        // Redis: SET login:refresh:{refreshToken} {userId} EX {refreshExpiration}
         stringRedisTemplate.opsForValue().set(
                 RedisKeyConstants.LOGIN_REFRESH_KEY + refreshToken,
                 String.valueOf(user.getId()),

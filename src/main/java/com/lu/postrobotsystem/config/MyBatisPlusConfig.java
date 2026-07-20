@@ -3,6 +3,7 @@ package com.lu.postrobotsystem.config;
 import com.baomidou.mybatisplus.annotation.DbType;
 import com.baomidou.mybatisplus.core.handlers.MetaObjectHandler;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
+import com.baomidou.mybatisplus.extension.plugins.inner.OptimisticLockerInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
 import org.apache.ibatis.reflection.MetaObject;
 import org.mybatis.spring.annotation.MapperScan;
@@ -42,6 +43,8 @@ public class MyBatisPlusConfig {
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
         // 添加分页拦截器，指定数据库类型为 MySQL
         interceptor.addInnerInterceptor(new PaginationInnerInterceptor(DbType.MYSQL));
+        // 添加乐观锁拦截器，支持 @Version 注解的乐观锁功能
+        interceptor.addInnerInterceptor(new OptimisticLockerInnerInterceptor());
         return interceptor;
     }
 

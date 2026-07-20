@@ -100,6 +100,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         ThrowUtils.throwIf(ObjectUtil.isNull(productId), PARAM_ERROR, "商品ID不能为空");
 
         // 查询未删除的库存记录
+        // SQL: SELECT id, product_id, real_stock, locked_stock, ... FROM inventory WHERE product_id=? AND is_deleted=0 LIMIT 1
         Inventory inventory = inventoryMapper.selectOne(
                 new LambdaQueryWrapper<Inventory>()
                         .eq(Inventory::getProductId, productId)
@@ -136,10 +137,12 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         ThrowUtils.throwIf(ObjectUtil.isNull(quantity) || quantity <= 0, PARAM_VALUE_INVALID, "入库数量必须大于0");
 
         // === 校验商品是否存在 ===
+        // SQL: SELECT id, name FROM product WHERE id=? AND is_deleted=0
         Product product = productService.getById(productId);
         ThrowUtils.throwIf(ObjectUtil.isNull(product), NOT_FOUND, "商品不存在");
 
         // === 查询或创建库存记录 ===
+        // SQL: SELECT id, product_id, real_stock, locked_stock, ... FROM inventory WHERE product_id=? AND is_deleted=0 LIMIT 1
         Inventory inventory = inventoryMapper.selectOne(
                 new LambdaQueryWrapper<Inventory>()
                         .eq(Inventory::getProductId, productId)
@@ -147,6 +150,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
 
         if (ObjectUtil.isNull(inventory)) {
             // 首次入库：创建新库存记录，设置默认低库存阈值和样品状态
+            // SQL: INSERT INTO inventory (id, product_id, real_stock, locked_stock, low_stock_threshold, sample_status, mismatch_flag, create_time, update_time, is_deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             inventory = new Inventory()
                     .setProductId(productId)
                     .setRealStock(quantity)               // 实际库存设为入库数量
@@ -157,11 +161,13 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
             save(inventory);
         } else {
             // 已有库存记录：累加实际库存
+            // SQL: UPDATE inventory SET real_stock=?, update_time=NOW() WHERE id=? AND is_deleted=0
             inventory.setRealStock(inventory.getRealStock() + quantity);
             updateById(inventory);
         }
 
         // === 同步 Redis 缓存：更新可用库存 = realStock - lockedStock ===
+        // Redis: SET stock:available:{productId} {availableStock}
         String availableKey = RedisKeyConstants.STOCK_AVAILABLE + productId;
         stringRedisTemplate.opsForValue().set(availableKey,
                 String.valueOf(inventory.getRealStock() - inventory.getLockedStock()));
@@ -194,6 +200,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         ThrowUtils.throwIf(ObjectUtil.isNull(quantity) || quantity <= 0, PARAM_VALUE_INVALID, "出库数量必须大于0");
 
         // === 查询库存记录 ===
+        // SQL: SELECT id, product_id, real_stock, locked_stock, ... FROM inventory WHERE product_id=? AND is_deleted=0 LIMIT 1
         Inventory inventory = inventoryMapper.selectOne(
                 new LambdaQueryWrapper<Inventory>()
                         .eq(Inventory::getProductId, productId)
@@ -207,10 +214,12 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
                 StrUtil.format("库存不足：可用库存={}，需求={}", availableStock, quantity));
 
         // === 扣减实际库存 ===
+        // SQL: UPDATE inventory SET real_stock=?, update_time=NOW() WHERE id=? AND is_deleted=0
         inventory.setRealStock(inventory.getRealStock() - quantity);
         updateById(inventory);
 
         // === 同步 Redis 缓存 ===
+        // Redis: SET stock:available:{productId} {availableStock}
         String availableKey = RedisKeyConstants.STOCK_AVAILABLE + productId;
         stringRedisTemplate.opsForValue().set(availableKey,
                 String.valueOf(inventory.getRealStock() - inventory.getLockedStock()));
@@ -261,6 +270,9 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
             String lockedKey = RedisKeyConstants.STOCK_LOCKED + productId;
 
             // === Lua 原子操作：扣减 availableStock，增加 lockedStock ===
+            // Lua: KEYS[1]=stock:available:{productId}, KEYS[2]=stock:locked:{productId}
+            // Lua: ARGV[1]=quantity, ARGV[2]=timestamp
+            // Lua: DECRBY(KEYS[1], ARGV[1]) + INCRBY(KEYS[2], ARGV[1])
             RScript script = redissonClient.getScript(StringCodec.INSTANCE);
             Long result = script.eval(
                     RScript.Mode.READ_WRITE,
@@ -276,11 +288,13 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
             }
 
             // === 同步更新 DB（在锁内执行，无并发问题） ===
+            // SQL: SELECT id, product_id, real_stock, locked_stock, ... FROM inventory WHERE product_id=? AND is_deleted=0 LIMIT 1
             Inventory inventory = inventoryMapper.selectOne(
                     new LambdaQueryWrapper<Inventory>()
                             .eq(Inventory::getProductId, productId)
                             .eq(Inventory::getIsDeleted, 0));
             if (inventory != null) {
+                // SQL: UPDATE inventory SET locked_stock=?, update_time=NOW() WHERE id=? AND is_deleted=0
                 inventory.setLockedStock(inventory.getLockedStock() + quantity);
                 inventoryMapper.updateById(inventory);
             }
@@ -324,6 +338,9 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
             String lockedKey = RedisKeyConstants.STOCK_LOCKED + productId;
 
             // === Lua 原子操作：扣减 lockedStock，归还 availableStock ===
+            // Lua: KEYS[1]=stock:available:{productId}, KEYS[2]=stock:locked:{productId}
+            // Lua: ARGV[1]=quantity, ARGV[2]=timestamp
+            // Lua: INCRBY(KEYS[1], ARGV[1]) + DECRBY(KEYS[2], ARGV[1])
             RScript script = redissonClient.getScript(StringCodec.INSTANCE);
             Long result = script.eval(
                     RScript.Mode.READ_WRITE,
@@ -338,12 +355,14 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
             }
 
             // === 同步更新 DB ===
+            // SQL: SELECT id, product_id, real_stock, locked_stock, ... FROM inventory WHERE product_id=? AND is_deleted=0 LIMIT 1
             Inventory inventory = inventoryMapper.selectOne(
                     new LambdaQueryWrapper<Inventory>()
                             .eq(Inventory::getProductId, productId)
                             .eq(Inventory::getIsDeleted, 0));
             if (inventory != null) {
                 // 使用 Math.max 防止 lockedStock 被扣为负数（兜底保护）
+                // SQL: UPDATE inventory SET locked_stock=?, update_time=NOW() WHERE id=? AND is_deleted=0
                 inventory.setLockedStock(Math.max(inventory.getLockedStock() - quantity, 0));
                 inventoryMapper.updateById(inventory);
             }
@@ -382,6 +401,9 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         lock.lock();
         try {
             // === Lua 原子操作：扣减 lockedStock ===
+            // Lua: KEYS[1]=stock:locked:{productId}
+            // Lua: ARGV[1]=quantity, ARGV[2]=timestamp
+            // Lua: DECRBY(KEYS[1], ARGV[1])
             RScript script = redissonClient.getScript(StringCodec.INSTANCE);
             Long result = script.eval(
                     RScript.Mode.READ_WRITE,
@@ -396,12 +418,14 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
             }
 
             // === 同步更新 DB：同时扣减 lockedStock 和 realStock ===
+            // SQL: SELECT id, product_id, real_stock, locked_stock, ... FROM inventory WHERE product_id=? AND is_deleted=0 LIMIT 1
             Inventory inventory = inventoryMapper.selectOne(
                     new LambdaQueryWrapper<Inventory>()
                             .eq(Inventory::getProductId, productId)
                             .eq(Inventory::getIsDeleted, 0));
             if (inventory != null) {
                 // lockedStock 和 realStock 同时扣减，表示库存已被实际消耗
+                // SQL: UPDATE inventory SET locked_stock=?, real_stock=?, update_time=NOW() WHERE id=? AND is_deleted=0
                 inventory.setLockedStock(Math.max(inventory.getLockedStock() - quantity, 0));
                 inventory.setRealStock(Math.max(inventory.getRealStock() - quantity, 0));
                 inventoryMapper.updateById(inventory);
@@ -409,9 +433,11 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
                 // 检查低库存阈值告警（用可用库存判断）
                 int available = inventory.getRealStock() - inventory.getLockedStock();
                 checkAndCreateLowStockAlert(productId, available, inventory.getLowStockThreshold());
-            }
 
-            log.info("库存扣减成功: productId={}, quantity={}, availableStock={}", productId, quantity, inventory.getRealStock() - inventory.getLockedStock());
+                log.info("库存扣减成功: productId={}, quantity={}, availableStock={}", productId, quantity, inventory.getRealStock() - inventory.getLockedStock());
+            } else {
+                log.warn("库存扣减后未找到库存记录: productId={}, quantity={}", productId, quantity);
+            }
             return true;
         } finally {
             lock.unlock();
@@ -443,6 +469,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         ThrowUtils.throwIf(ObjectUtil.isNull(sampleStatus), PARAM_VALUE_INVALID, "样品状态值不合法");
 
         // === 查询库存记录 ===
+        // SQL: SELECT id, product_id, real_stock, locked_stock, sample_status, mismatch_flag, ... FROM inventory WHERE product_id=? AND is_deleted=0 LIMIT 1
         Inventory inventory = inventoryMapper.selectOne(
                 new LambdaQueryWrapper<Inventory>()
                         .eq(Inventory::getProductId, productId)
@@ -458,6 +485,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
             inventory.setMismatchFlag(visionInspectRequest.getMismatchFlag());
         }
         inventory.setVisionInspectTime(java.time.LocalDateTime.now());
+        // SQL: UPDATE inventory SET sample_status=?, mismatch_flag=?, vision_inspect_time=?, update_time=NOW() WHERE id=? AND is_deleted=0
         updateById(inventory);
 
         // === 巡检异常时创建告警 ===
@@ -465,6 +493,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
                 || Boolean.TRUE.equals(visionInspectRequest.getMismatchFlag());
 
         if (hasIssue) {
+            // SQL: SELECT id, name FROM product WHERE id=? AND is_deleted=0
             Product product = productService.getById(productId);
             String productName = product != null ? product.getName() : "商品ID:" + productId;
 
@@ -480,6 +509,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
             }
 
             // 避免重复创建相同来源的未解决告警：若已有同来源 UNRESOLVED 告警则跳过
+            // SQL: SELECT COUNT(*) FROM alert WHERE source='inventory' AND source_id=? AND status='UNRESOLVED' AND is_deleted=0
             Long existingAlert = alertMapper.selectCount(
                     new LambdaQueryWrapper<Alert>()
                             .eq(Alert::getSource, "inventory")
@@ -487,6 +517,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
                             .eq(Alert::getStatus, AlertStatusEnum.UNRESOLVED)
                             .eq(Alert::getIsDeleted, 0));
             if (existingAlert == 0) {
+                // SQL: INSERT INTO alert (id, alert_type, alert_level, source, source_id, message, status, is_deleted, create_time, update_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 Alert alert = new Alert()
                         .setAlertType(AlertTypeEnum.STOCK_DISCREPANCY)
                         .setAlertLevel(AlertLevelEnum.WARNING)
@@ -521,6 +552,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         ThrowUtils.throwIf(ObjectUtil.isNull(request.getProductId()), PARAM_ERROR, "商品ID不能为空");
 
         // 查询库存记录
+        // SQL: SELECT id, product_id, real_stock, locked_stock, ... FROM inventory WHERE product_id=? AND is_deleted=0 LIMIT 1
         Inventory inventory = inventoryMapper.selectOne(
                 new LambdaQueryWrapper<Inventory>()
                         .eq(Inventory::getProductId, request.getProductId())
@@ -549,9 +581,12 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
             inventory.setMismatchFlag(request.getMismatchFlag());
         }
 
+        // SQL: UPDATE inventory SET real_stock=?, locked_stock=?, low_stock_threshold=?, sample_status=?, mismatch_flag=?, update_time=NOW() WHERE id=? AND is_deleted=0
         updateById(inventory);
 
         // 同步 Redis 缓存
+        // Redis: SET stock:available:{productId} {availableStock}
+        // Redis: SET stock:locked:{productId} {lockedStock}
         String availableKey = RedisKeyConstants.STOCK_AVAILABLE + request.getProductId();
         stringRedisTemplate.opsForValue().set(availableKey,
                 String.valueOf(inventory.getRealStock() - inventory.getLockedStock()));
@@ -573,6 +608,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
     public void deleteInventory(Long productId) {
         ThrowUtils.throwIf(ObjectUtil.isNull(productId), PARAM_ERROR, "商品ID不能为空");
 
+        // SQL: SELECT id, product_id, real_stock, ... FROM inventory WHERE product_id=? AND is_deleted=0 LIMIT 1
         Inventory inventory = inventoryMapper.selectOne(
                 new LambdaQueryWrapper<Inventory>()
                         .eq(Inventory::getProductId, productId)
@@ -580,10 +616,13 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         ThrowUtils.throwIf(ObjectUtil.isNull(inventory), NOT_FOUND, "该商品库存记录不存在");
 
         // 逻辑删除
+        // SQL: UPDATE inventory SET is_deleted=1, update_time=NOW() WHERE id=? AND is_deleted=0
         inventory.setIsDeleted(1);
         updateById(inventory);
 
         // 清理 Redis 缓存
+        // Redis: DEL stock:available:{productId}
+        // Redis: DEL stock:locked:{productId}
         stringRedisTemplate.delete(RedisKeyConstants.STOCK_AVAILABLE + productId);
         stringRedisTemplate.delete(RedisKeyConstants.STOCK_LOCKED + productId);
 
@@ -603,6 +642,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         if (currentStock > threshold) return;
 
         // 检查是否已有未解决的低库存告警
+        // SQL: SELECT COUNT(*) FROM alert WHERE alert_type='LOW_STOCK' AND source_id=? AND status='UNRESOLVED' AND is_deleted=0
         Long existingAlert = alertMapper.selectCount(
                 new LambdaQueryWrapper<Alert>()
                         .eq(Alert::getAlertType, AlertTypeEnum.LOW_STOCK)
@@ -611,9 +651,11 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
                         .eq(Alert::getIsDeleted, 0));
         if (existingAlert > 0) return; // 已有未解决的告警，不再重复创建
 
+        // SQL: SELECT id, name FROM product WHERE id=? AND is_deleted=0
         Product product = productService.getById(productId);
         String productName = product != null ? product.getName() : "商品ID:" + productId;
 
+        // SQL: INSERT INTO alert (id, alert_type, alert_level, source, source_id, message, status, is_deleted, create_time, update_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         Alert alert = new Alert()
                 .setAlertType(AlertTypeEnum.LOW_STOCK)
                 .setAlertLevel(AlertLevelEnum.WARNING)
@@ -658,6 +700,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         vo.setUpdateTime(inventory.getUpdateTime());
 
         // 关联查询：获取商品名称
+        // SQL: SELECT id, name FROM product WHERE id=? AND is_deleted=0
         Product product = productService.getById(inventory.getProductId());
         if (ObjectUtil.isNotNull(product)) {
             vo.setProductName(product.getName());
@@ -699,6 +742,7 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
         if (ObjectUtil.isNotNull(query)) {
             // 按商品名称模糊搜索（先查 product 表获取匹配的 ID，再过滤 inventory）
             if (StrUtil.isNotBlank(query.getProductName())) {
+                // SQL: SELECT id FROM product WHERE name LIKE '%?%' AND is_deleted=0
                 List<Product> matchedProducts = productService.list(
                         new LambdaQueryWrapper<Product>()
                                 .like(Product::getName, query.getProductName().trim())
@@ -738,20 +782,24 @@ public class InventoryServiceImpl extends ServiceImpl<InventoryMapper, Inventory
     private void ensureStockInRedis(Long productId) {
         String availableKey = RedisKeyConstants.STOCK_AVAILABLE + productId;
         // 如果 Redis 中已有缓存，直接返回
+        // Redis: EXISTS stock:available:{productId}
         if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(availableKey))) {
             return;
         }
 
         // 从 DB 加载库存数据并写入 Redis
+        // SQL: SELECT id, product_id, real_stock, locked_stock, ... FROM inventory WHERE product_id=? AND is_deleted=0 LIMIT 1
         Inventory inventory = inventoryMapper.selectOne(
                 new LambdaQueryWrapper<Inventory>()
                         .eq(Inventory::getProductId, productId)
                         .eq(Inventory::getIsDeleted, 0));
         if (inventory != null) {
             // 写入可用库存 = realStock - lockedStock
+            // Redis: SET stock:available:{productId} {availableStock}
             int available = inventory.getRealStock() - inventory.getLockedStock();
             stringRedisTemplate.opsForValue().set(availableKey, String.valueOf(available));
             // 写入锁定库存
+            // Redis: SET stock:locked:{productId} {lockedStock}
             stringRedisTemplate.opsForValue().set(
                     RedisKeyConstants.STOCK_LOCKED + productId, String.valueOf(inventory.getLockedStock()));
         }

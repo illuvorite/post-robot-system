@@ -31,6 +31,10 @@ public enum OperationTypeEnum {
     TASK_MANUAL("TASK_MANUAL", "人工任务处理"),
     /** 调用邮政系统外部接口 */
     POSTAL_API_CALL("POSTAL_API_CALL", "邮政接口调用"),
+    /** 订单支付超时自动取消 */
+    ORDER_TIMEOUT("ORDER_TIMEOUT", "订单超时"),
+    /** 接收支付回调通知 */
+    PAYMENT_CALLBACK("PAYMENT_CALLBACK", "支付回调"),
     /** 用户权限变更操作 */
     PERMISSION_CHANGE("PERMISSION_CHANGE", "权限变更"),
     /** 导出审计日志 */

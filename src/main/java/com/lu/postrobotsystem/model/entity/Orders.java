@@ -40,6 +40,11 @@ public class Orders implements Serializable {
     @Schema(description = "订单号")
     private String orderNo;
 
+    /** 用户ID，关联用户表 */
+    @TableField("user_id")
+    @Schema(description = "用户ID")
+    private Long userId;
+
     /** 订单总金额（商品总价 + 邮资） */
     @TableField("total_amount")
     @Schema(description = "订单总金额")
@@ -84,6 +89,12 @@ public class Orders implements Serializable {
     @TableField("remark")
     @Schema(description = "备注/失败原因")
     private String remark;
+
+    /** 乐观锁版本号，用于状态更新的并发控制 */
+    @TableField("version")
+    @Version
+    @Schema(description = "乐观锁版本号")
+    private Integer version;
 
     /** 记录创建时间 */
     @TableField(value = "create_time", fill = FieldFill.INSERT)
